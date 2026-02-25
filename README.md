@@ -28,6 +28,29 @@ Run:
 
 The script requires both `go` and `node` toolchains.
 
+## Connector TEE Runtime Env
+
+Required:
+
+- `CONNECTOR_ID`
+
+TEE mode (default):
+
+- `DSTACK_SIMULATOR_ENDPOINT` (optional; set for local simulator instead of unix socket)
+- `DSTACK_KEY_PATH` (optional; default `ssh/connector/v1`)
+- `DSTACK_KEY_SUBJECT` (optional; default `ed25519`)
+
+Measurements:
+
+- `MRTD`, `RTMR0`, `RTMR1`, `RTMR2`, `RTMR3`
+- `EVENT_LOG` (optional; default `[]`)
+- `POLICY_VERSION` (optional; default `v1`)
+
+Legacy local fallback mode (for non-TEE development only):
+
+- `TEE_SEED_B64`
+- `TEE_QUOTE_HEX`
+
 ## Local Agent Runtime Env
 
 Required:

@@ -9,6 +9,9 @@ Reference for local-agent failure reasons returned to control plane and chat cha
 - `AttestationDependencyFailure`
   - Meaning: strict verification dependency (PCCS/Intel endpoint/verifier backend) failed.
   - Behavior: fail-closed; request must not continue.
+- `BundleInvalid`
+  - Meaning: signed attestation bundle failed verification (signature, `kid`, payload integrity).
+  - Behavior: reject request before quote checks.
 - `QuoteInvalid`
   - Meaning: quote cryptographic checks, QE identity, or TCB validation failed.
   - Behavior: reject request.
@@ -28,5 +31,6 @@ Reference for local-agent failure reasons returned to control plane and chat cha
 2. Confirm decision was locally approved for the same request.
 3. Inspect local-agent verification logs for specific failure code.
 4. If dependency/availability issue, restore verifier dependencies first.
-5. If cryptographic/policy issue, compare attestation bundle fields with expected policy.
-6. Retry only with new request ID and fresh local confirmation.
+5. If `BundleInvalid`, verify `kid` overlap and control-plane public key map first.
+6. If cryptographic/policy issue, compare attestation bundle fields with expected policy.
+7. Retry only with new request ID and fresh local confirmation.

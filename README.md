@@ -51,6 +51,19 @@ Legacy local fallback mode (for non-TEE development only):
 - `TEE_SEED_B64`
 - `TEE_QUOTE_HEX`
 
+## Control Plane Runtime Env
+
+Required:
+
+- `SIGNING_KEY_B64`
+- `API_AUTH_TOKEN`
+
+Optional:
+
+- `BIND_ADDR` (default `127.0.0.1:8080`)
+- `STORE_PATH` (default `./var/control-plane-requests.json`)
+- `CONNECTOR_BUNDLE_TEMPLATES_JSON`
+
 ## Local Agent Runtime Env
 
 Required:

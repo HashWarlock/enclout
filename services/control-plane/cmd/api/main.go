@@ -25,27 +25,33 @@ func main() {
 		log.Fatalf("create signer: %v", err)
 	}
 
-	store := requests.NewInMemoryStore()
+	store, err := requests.NewFileStore(cfg.StorePath)
+	if err != nil {
+		log.Fatalf("create persistent store: %v", err)
+	}
 	bundles := handlers.NewStaticBundleSource(loadBundleTemplatesFromEnv())
 	api := handlers.NewHandler(store, signer, bundles)
 	openClawHandler := openclaw.NewIntentHandler(store)
+	requireAuth := func(next http.HandlerFunc) http.HandlerFunc {
+		return handlers.RequireBearerToken(cfg.APIToken, next)
+	}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/v1/connection-requests", methodOnly(http.MethodPost, api.CreateRequest))
+	mux.HandleFunc("/v1/connection-requests", requireAuth(methodOnly(http.MethodPost, api.CreateRequest)))
 	mux.HandleFunc("/v1/connection-requests/", func(w http.ResponseWriter, r *http.Request) {
 		switch {
 		case strings.HasSuffix(r.URL.Path, "/local-decision") && r.Method == http.MethodPost:
-			api.LocalDecision(w, r)
+			requireAuth(api.LocalDecision)(w, r)
 		case strings.HasSuffix(r.URL.Path, "/result") && r.Method == http.MethodPost:
-			api.Result(w, r)
+			requireAuth(api.Result)(w, r)
 		case strings.HasSuffix(r.URL.Path, "/attestation-bundle") && r.Method == http.MethodGet:
-			api.AttestationBundle(w, r)
+			requireAuth(api.AttestationBundle)(w, r)
 		default:
 			http.NotFound(w, r)
 		}
 	})
-	mux.HandleFunc("/v1/devices/", methodOnly(http.MethodGet, api.ListPendingRequestsForDevice))
-	mux.HandleFunc("/v1/openclaw/intents", methodOnly(http.MethodPost, openClawHandler.Handle))
+	mux.HandleFunc("/v1/devices/", requireAuth(methodOnly(http.MethodGet, api.ListPendingRequestsForDevice)))
+	mux.HandleFunc("/v1/openclaw/intents", requireAuth(methodOnly(http.MethodPost, openClawHandler.Handle)))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))

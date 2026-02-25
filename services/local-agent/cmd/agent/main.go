@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -21,7 +23,10 @@ func main() {
 	controlPlaneURL := mustEnv("CONTROL_PLANE_URL")
 	deviceID := mustEnv("DEVICE_ID")
 	localUser := mustEnv("LOCAL_USERNAME")
-	controlPlaneSigningPublicKeyB64 := mustEnv("CONTROL_PLANE_SIGNING_PUBKEY_B64")
+	controlPlaneSigningKeysB64, err := loadTrustedControlPlaneSigningKeysFromEnv()
+	if err != nil {
+		log.Fatalf("load control-plane signing keys: %v", err)
+	}
 	token := os.Getenv("AGENT_TOKEN")
 	keysDir := os.Getenv("MANAGED_KEYS_DIR")
 	if keysDir == "" {
@@ -41,7 +46,7 @@ func main() {
 	}
 	verifier := verify.NewStrictVerifier(dcapVerifier, policy)
 	keyManager := sshkeys.NewManager(keysDir)
-	runner := flow.NewRunner(apiClient, prompter, verifier, keyManager, controlPlaneSigningPublicKeyB64)
+	runner := flow.NewRunner(apiClient, prompter, verifier, keyManager, controlPlaneSigningKeysB64)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -96,6 +101,36 @@ func splitCSV(v string) []string {
 		}
 	}
 	return out
+}
+
+func loadTrustedControlPlaneSigningKeysFromEnv() (map[string]string, error) {
+	rawJSON := strings.TrimSpace(os.Getenv("CONTROL_PLANE_SIGNING_KEYS_JSON"))
+	if rawJSON != "" {
+		var out map[string]string
+		if err := json.Unmarshal([]byte(rawJSON), &out); err != nil {
+			return nil, fmt.Errorf("invalid CONTROL_PLANE_SIGNING_KEYS_JSON: %w", err)
+		}
+		if len(out) == 0 {
+			return nil, fmt.Errorf("CONTROL_PLANE_SIGNING_KEYS_JSON must contain at least one key")
+		}
+		for kid, key := range out {
+			if strings.TrimSpace(kid) == "" || strings.TrimSpace(key) == "" {
+				return nil, fmt.Errorf("CONTROL_PLANE_SIGNING_KEYS_JSON contains empty kid or key")
+			}
+		}
+		return out, nil
+	}
+
+	// Backward-compatible single-key mode.
+	pub := strings.TrimSpace(os.Getenv("CONTROL_PLANE_SIGNING_PUBKEY_B64"))
+	if pub == "" {
+		return nil, fmt.Errorf("missing CONTROL_PLANE_SIGNING_KEYS_JSON or CONTROL_PLANE_SIGNING_PUBKEY_B64")
+	}
+	kid := strings.TrimSpace(os.Getenv("CONTROL_PLANE_SIGNING_KID"))
+	if kid == "" {
+		kid = "v1"
+	}
+	return map[string]string{kid: pub}, nil
 }
 
 func parseDurationOrDefault(raw string, fallback time.Duration) time.Duration {

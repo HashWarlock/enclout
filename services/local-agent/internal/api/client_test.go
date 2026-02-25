@@ -55,7 +55,7 @@ func TestPostLocalDecision(t *testing.T) {
 
 func TestGetAttestationBundleIncludesRawPayloadForSignatureVerification(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		fmt.Fprint(w, `{"payload":{"connector_id":"conn_1","ssh_public_key":"ssh-ed25519 AAAATEST connector@tee","quote_hex":"abcd","mrtd":"mrtd","rtmr0":"rtmr0","rtmr1":"rtmr1","rtmr2":"rtmr2","rtmr3":"rtmr3","report_data_expected_sha256":"abc","policy_version":"v1"},"signature":"sig","alg":"ed25519"}`)
+		fmt.Fprint(w, `{"payload":{"connector_id":"conn_1","ssh_public_key":"ssh-ed25519 AAAATEST connector@tee","quote_hex":"abcd","mrtd":"mrtd","rtmr0":"rtmr0","rtmr1":"rtmr1","rtmr2":"rtmr2","rtmr3":"rtmr3","report_data_expected_sha256":"abc","policy_version":"v1"},"signature":"sig","alg":"ed25519","kid":"v1"}`)
 	}))
 	defer srv.Close()
 
@@ -69,5 +69,8 @@ func TestGetAttestationBundleIncludesRawPayloadForSignatureVerification(t *testi
 	}
 	if bundle.Payload["connector_id"] != "conn_1" {
 		t.Fatalf("unexpected payload contents: %+v", bundle.Payload)
+	}
+	if bundle.KID != "v1" {
+		t.Fatalf("expected bundle kid v1, got %q", bundle.KID)
 	}
 }

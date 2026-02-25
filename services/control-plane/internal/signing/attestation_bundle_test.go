@@ -37,6 +37,9 @@ func TestSignAndVerifyBundle(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected sign error: %v", err)
 	}
+	if signed.KID != DefaultSigningKID {
+		t.Fatalf("expected default kid %q, got %q", DefaultSigningKID, signed.KID)
+	}
 
 	ok, err := VerifyBundle(payload, signed.Signature, signer.PublicKeyB64())
 	if err != nil {

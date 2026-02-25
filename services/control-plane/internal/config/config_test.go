@@ -48,3 +48,22 @@ func TestLoadConfigRequiresAPIToken(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestLoadConfigSupportsSigningKeyset(t *testing.T) {
+	t.Setenv("BIND_ADDR", "127.0.0.1:8080")
+	t.Setenv("SIGNING_KEY_B64", "")
+	t.Setenv("SIGNING_KEYS_JSON", `{"v1":"ZmFrZS1zaWduaW5nLWtleS0xMjM0NTY3ODkwMTIzNDU2Nzg5MDE=","v2":"YWJjZGVmZ2hpamtsbW5vcHFyc3R1dnd4eXoxMjM0NTY="}`)
+	t.Setenv("SIGNING_ACTIVE_KID", "v2")
+	t.Setenv("API_AUTH_TOKEN", "tok")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cfg.SigningActiveKID != "v2" {
+		t.Fatalf("expected active kid v2, got %q", cfg.SigningActiveKID)
+	}
+	if len(cfg.SigningKeys) != 2 {
+		t.Fatalf("expected 2 signing keys, got %d", len(cfg.SigningKeys))
+	}
+}

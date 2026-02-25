@@ -20,9 +20,9 @@ func main() {
 		log.Fatalf("load config: %v", err)
 	}
 
-	signer, err := signing.NewEd25519SignerFromSeedB64(cfg.SigningKeyB64)
+	signerSet, err := signing.NewSignerSetFromSeedMap(cfg.SigningKeys, cfg.SigningActiveKID)
 	if err != nil {
-		log.Fatalf("create signer: %v", err)
+		log.Fatalf("create signer set: %v", err)
 	}
 
 	store, err := requests.NewFileStore(cfg.StorePath)
@@ -30,7 +30,7 @@ func main() {
 		log.Fatalf("create persistent store: %v", err)
 	}
 	bundles := handlers.NewStaticBundleSource(loadBundleTemplatesFromEnv())
-	api := handlers.NewHandler(store, signer, bundles)
+	api := handlers.NewHandler(store, signerSet, bundles)
 	openClawHandler := openclaw.NewIntentHandler(store)
 	requireAuth := func(next http.HandlerFunc) http.HandlerFunc {
 		return handlers.RequireBearerToken(cfg.APIToken, next)
@@ -52,6 +52,7 @@ func main() {
 	})
 	mux.HandleFunc("/v1/devices/", requireAuth(methodOnly(http.MethodGet, api.ListPendingRequestsForDevice)))
 	mux.HandleFunc("/v1/openclaw/intents", requireAuth(methodOnly(http.MethodPost, openClawHandler.Handle)))
+	mux.HandleFunc("/v1/signing-keys", requireAuth(methodOnly(http.MethodGet, api.SigningKeys)))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))

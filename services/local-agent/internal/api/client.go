@@ -11,9 +11,9 @@ import (
 )
 
 type Request struct {
-	ID            string `json:"id"`
-	ConnectorID   string `json:"connector_id"`
-	DeviceID      string `json:"device_id"`
+	ID             string `json:"id"`
+	ConnectorID    string `json:"connector_id"`
+	DeviceID       string `json:"device_id"`
 	OpenClawUserID string `json:"openclaw_user_id"`
 }
 
@@ -22,6 +22,7 @@ type Bundle struct {
 	PayloadRaw []byte         `json:"-"`
 	Signature  string         `json:"signature"`
 	Alg        string         `json:"alg"`
+	KID        string         `json:"kid"`
 }
 
 type Client struct {
@@ -88,6 +89,7 @@ func (c *Client) GetAttestationBundle(ctx context.Context, requestID string) (Bu
 		Payload   json.RawMessage `json:"payload"`
 		Signature string          `json:"signature"`
 		Alg       string          `json:"alg"`
+		KID       string          `json:"kid"`
 	}
 	if err := json.NewDecoder(res.Body).Decode(&raw); err != nil {
 		return Bundle{}, err
@@ -103,6 +105,7 @@ func (c *Client) GetAttestationBundle(ctx context.Context, requestID string) (Bu
 		PayloadRaw: append([]byte(nil), raw.Payload...),
 		Signature:  raw.Signature,
 		Alg:        raw.Alg,
+		KID:        raw.KID,
 	}, nil
 }
 

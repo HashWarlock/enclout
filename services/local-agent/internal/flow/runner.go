@@ -37,20 +37,24 @@ type Request struct {
 }
 
 type Runner struct {
-	api                           API
-	prompter                      Prompter
-	verifier                      Verifier
-	keys                          KeyInstaller
-	controlPlaneSigningPublicKeyB64 string
+	api                        API
+	prompter                   Prompter
+	verifier                   Verifier
+	keys                       KeyInstaller
+	controlPlaneSigningKeysB64 map[string]string
 }
 
-func NewRunner(apiClient API, prompter Prompter, verifier Verifier, keys KeyInstaller, controlPlaneSigningPublicKeyB64 string) Runner {
+func NewRunner(apiClient API, prompter Prompter, verifier Verifier, keys KeyInstaller, controlPlaneSigningKeysB64 map[string]string) Runner {
+	keysetCopy := make(map[string]string, len(controlPlaneSigningKeysB64))
+	for kid, key := range controlPlaneSigningKeysB64 {
+		keysetCopy[kid] = key
+	}
 	return Runner{
-		api:                            apiClient,
-		prompter:                       prompter,
-		verifier:                       verifier,
-		keys:                           keys,
-		controlPlaneSigningPublicKeyB64: controlPlaneSigningPublicKeyB64,
+		api:                        apiClient,
+		prompter:                   prompter,
+		verifier:                   verifier,
+		keys:                       keys,
+		controlPlaneSigningKeysB64: keysetCopy,
 	}
 }
 
@@ -75,11 +79,12 @@ func (r Runner) Process(ctx context.Context, req Request) error {
 		return err
 	}
 
-	if err := verify.VerifySignedBundle(
+	if err := verify.VerifySignedBundleWithKeyset(
 		signedBundle.PayloadRaw,
 		signedBundle.Signature,
 		signedBundle.Alg,
-		r.controlPlaneSigningPublicKeyB64,
+		signedBundle.KID,
+		r.controlPlaneSigningKeysB64,
 	); err != nil {
 		_ = r.api.PostResult(ctx, req.ID, "verification_failed", verify.ReasonBundleInvalid)
 		return err

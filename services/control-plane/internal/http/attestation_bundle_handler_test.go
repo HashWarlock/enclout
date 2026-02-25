@@ -28,6 +28,9 @@ func TestGetAttestationBundle(t *testing.T) {
 	if !strings.Contains(rr.Body.String(), `"signature"`) {
 		t.Fatalf("expected signature in response, got %s", rr.Body.String())
 	}
+	if !strings.Contains(rr.Body.String(), `"kid":"v1"`) {
+		t.Fatalf("expected signing kid in response, got %s", rr.Body.String())
+	}
 	if !strings.Contains(rr.Body.String(), `"report_data_expected_sha256"`) {
 		t.Fatalf("expected report-data hash in response, got %s", rr.Body.String())
 	}

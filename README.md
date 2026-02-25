@@ -55,8 +55,16 @@ Legacy local fallback mode (for non-TEE development only):
 
 Required:
 
-- `SIGNING_KEY_B64`
 - `API_AUTH_TOKEN`
+
+Signing key configuration (choose one):
+
+- Single key mode:
+  - `SIGNING_KEY_B64`
+  - Optional `SIGNING_ACTIVE_KID` (default `v1`)
+- Rotation/keyset mode:
+  - `SIGNING_KEYS_JSON` (JSON object of `kid -> seed_b64`)
+  - `SIGNING_ACTIVE_KID` (must exist in `SIGNING_KEYS_JSON`)
 
 Optional:
 
@@ -71,8 +79,15 @@ Required:
 - `CONTROL_PLANE_URL`
 - `DEVICE_ID`
 - `LOCAL_USERNAME`
-- `CONTROL_PLANE_SIGNING_PUBKEY_B64`
 - `DCAP_VERIFIER_URL`
+
+Control-plane signing trust configuration (choose one):
+
+- Keyset mode:
+  - `CONTROL_PLANE_SIGNING_KEYS_JSON` (JSON object of `kid -> public_key_b64`)
+- Single key mode (backward compatible):
+  - `CONTROL_PLANE_SIGNING_PUBKEY_B64`
+  - Optional `CONTROL_PLANE_SIGNING_KID` (default `v1`)
 
 Optional:
 

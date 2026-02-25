@@ -82,7 +82,7 @@ func TestRunnerHappyPath(t *testing.T) {
 	apiClient := &fakeAPI{bundle: bundle}
 	keys := &fakeKeys{}
 	quoteVerifier := &fakeVerifier{decision: verify.Decision{Trusted: true}}
-	r := NewRunner(apiClient, fakePrompter{approved: true}, quoteVerifier, keys, publicKeyB64)
+	r := NewRunner(apiClient, fakePrompter{approved: true}, quoteVerifier, keys, map[string]string{"v1": publicKeyB64})
 
 	err := r.Process(context.Background(), Request{
 		ID:          "req_1",
@@ -115,7 +115,7 @@ func TestRunnerVerificationFailure(t *testing.T) {
 	keys := &fakeKeys{}
 	verr := verify.VerificationError{Code: verify.ReasonReportDataMismatch, Err: errors.New("mismatch")}
 	quoteVerifier := &fakeVerifier{err: verr}
-	r := NewRunner(apiClient, fakePrompter{approved: true}, quoteVerifier, keys, publicKeyB64)
+	r := NewRunner(apiClient, fakePrompter{approved: true}, quoteVerifier, keys, map[string]string{"v1": publicKeyB64})
 
 	err := r.Process(context.Background(), Request{
 		ID:          "req_1",
@@ -138,7 +138,7 @@ func TestRunnerRejectsInvalidBundleSignatureBeforeQuoteChecks(t *testing.T) {
 	apiClient := &fakeAPI{bundle: bundle}
 	keys := &fakeKeys{}
 	quoteVerifier := &fakeVerifier{decision: verify.Decision{Trusted: true}}
-	r := NewRunner(apiClient, fakePrompter{approved: true}, quoteVerifier, keys, publicKeyB64)
+	r := NewRunner(apiClient, fakePrompter{approved: true}, quoteVerifier, keys, map[string]string{"v1": publicKeyB64})
 
 	err := r.Process(context.Background(), Request{
 		ID:          "req_1",
@@ -159,6 +159,35 @@ func TestRunnerRejectsInvalidBundleSignatureBeforeQuoteChecks(t *testing.T) {
 	}
 	if keys.installed {
 		t.Fatalf("expected no key installation on invalid bundle signature")
+	}
+}
+
+func TestRunnerRejectsUnknownKIDBeforeQuoteChecks(t *testing.T) {
+	bundle, _ := signedBundleFixture(t, false)
+	bundle.KID = "v2"
+	apiClient := &fakeAPI{bundle: bundle}
+	keys := &fakeKeys{}
+	quoteVerifier := &fakeVerifier{decision: verify.Decision{Trusted: true}}
+	r := NewRunner(apiClient, fakePrompter{approved: true}, quoteVerifier, keys, map[string]string{
+		"v1": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
+	})
+
+	err := r.Process(context.Background(), Request{
+		ID:          "req_1",
+		ConnectorID: "conn_1",
+		LocalUser:   "alice",
+	})
+	if err == nil {
+		t.Fatalf("expected unknown kid error")
+	}
+	if apiClient.resultStatus != "verification_failed" {
+		t.Fatalf("expected verification_failed status")
+	}
+	if apiClient.resultReason != verify.ReasonBundleInvalid {
+		t.Fatalf("expected %q, got %q", verify.ReasonBundleInvalid, apiClient.resultReason)
+	}
+	if quoteVerifier.calls != 0 {
+		t.Fatalf("expected quote verifier not to run on unknown kid")
 	}
 }
 
@@ -185,6 +214,7 @@ func signedBundleFixture(t *testing.T, tamperSignature bool) (api.Bundle, string
 			PayloadRaw: payloadRaw,
 			Signature:  base64.StdEncoding.EncodeToString(signature),
 			Alg:        "ed25519",
+			KID:        "v1",
 		},
 		base64.StdEncoding.EncodeToString(publicKey)
 }

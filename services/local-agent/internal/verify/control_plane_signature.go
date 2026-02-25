@@ -30,6 +30,18 @@ func VerifySignedBundle(payloadRaw []byte, signatureB64 string, alg string, publ
 	return nil
 }
 
+func VerifySignedBundleWithKeyset(payloadRaw []byte, signatureB64 string, alg string, kid string, trustedKeys map[string]string) error {
+	kid = strings.TrimSpace(kid)
+	if kid == "" {
+		return VerificationError{Code: ReasonBundleInvalid, Err: fmt.Errorf("missing bundle kid")}
+	}
+	publicKeyB64, ok := trustedKeys[kid]
+	if !ok {
+		return VerificationError{Code: ReasonBundleInvalid, Err: fmt.Errorf("unknown bundle kid %q", kid)}
+	}
+	return VerifySignedBundle(payloadRaw, signatureB64, alg, publicKeyB64)
+}
+
 func decodePublicKey(publicKeyB64 string) (ed25519.PublicKey, error) {
 	raw, err := base64.StdEncoding.DecodeString(strings.TrimSpace(publicKeyB64))
 	if err != nil {

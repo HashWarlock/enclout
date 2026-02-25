@@ -62,13 +62,13 @@ func (s *StaticBundleSource) GetBundle(connectorID string) (BundleTemplate, erro
 
 type Handler struct {
 	store      RequestStore
-	signer     *signing.Ed25519Signer
+	signer     signing.BundleSigner
 	bundles    BundleSource
 	nowFn      func() time.Time
 	requestTTL time.Duration
 }
 
-func NewHandler(store RequestStore, signer *signing.Ed25519Signer, bundles BundleSource) *Handler {
+func NewHandler(store RequestStore, signer signing.BundleSigner, bundles BundleSource) *Handler {
 	return &Handler{
 		store:      store,
 		signer:     signer,

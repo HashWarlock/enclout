@@ -46,3 +46,26 @@ func TestVerifySignedBundleInvalidSignature(t *testing.T) {
 		t.Fatalf("expected reason %q, got %q", ReasonBundleInvalid, verr.Code)
 	}
 }
+
+func TestVerifySignedBundleWithKeysetUnknownKID(t *testing.T) {
+	err := VerifySignedBundleWithKeyset(
+		[]byte(`{"connector_id":"conn_1","quote_hex":"abcd"}`),
+		base64.StdEncoding.EncodeToString(make([]byte, ed25519.SignatureSize)),
+		"ed25519",
+		"v2",
+		map[string]string{
+			"v1": base64.StdEncoding.EncodeToString(make([]byte, ed25519.PublicKeySize)),
+		},
+	)
+	if err == nil {
+		t.Fatalf("expected unknown kid error")
+	}
+
+	var verr VerificationError
+	if !errors.As(err, &verr) {
+		t.Fatalf("expected VerificationError, got %v", err)
+	}
+	if verr.Code != ReasonBundleInvalid {
+		t.Fatalf("expected reason %q, got %q", ReasonBundleInvalid, verr.Code)
+	}
+}

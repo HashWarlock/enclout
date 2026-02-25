@@ -27,3 +27,21 @@ Run:
 ```
 
 The script requires both `go` and `node` toolchains.
+
+## Local Agent Runtime Env
+
+Required:
+
+- `CONTROL_PLANE_URL`
+- `DEVICE_ID`
+- `LOCAL_USERNAME`
+- `DCAP_VERIFIER_URL`
+
+Optional:
+
+- `AGENT_TOKEN`
+- `DCAP_VERIFIER_TOKEN`
+- `DCAP_VERIFIER_TIMEOUT` (seconds or duration string, default `10s`)
+- `MANAGED_KEYS_DIR` (default `/var/lib/connector-agent/keys`)
+- `ALLOW_MRTD` (comma-separated allowlist)
+- `ALLOW_RTMR3` (comma-separated allowlist)

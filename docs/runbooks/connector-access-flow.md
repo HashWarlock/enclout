@@ -8,6 +8,7 @@ Describe the operator sequence for channel-initiated connector access with local
 
 - Control plane is reachable over HTTPS.
 - Local agent is running on Linux or macOS.
+- Local agent has `DCAP_VERIFIER_URL` configured to a strict DCAP verification service.
 - Connector metadata is published for the requested `connector_id`.
 - Device has active OpenClaw pairing for at least one chat channel.
 

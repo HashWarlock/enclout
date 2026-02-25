@@ -5,6 +5,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -29,7 +30,15 @@ func main() {
 	apiClient := api.NewClient(controlPlaneURL, token)
 	prompter := approval.NewPrompter(approval.NewNativePrompter(), approval.NewCLIPrompter(os.Stdin, os.Stdout))
 	policy := verify.NewStaticPolicy(splitCSV(os.Getenv("ALLOW_MRTD")), splitCSV(os.Getenv("ALLOW_RTMR3")))
-	verifier := verify.NewStrictVerifier(verify.UnimplementedDCAP{}, policy)
+	dcapVerifier, err := verify.NewHTTPDCAPVerifier(
+		mustEnv("DCAP_VERIFIER_URL"),
+		os.Getenv("DCAP_VERIFIER_TOKEN"),
+		parseDurationOrDefault(os.Getenv("DCAP_VERIFIER_TIMEOUT"), 10*time.Second),
+	)
+	if err != nil {
+		log.Fatalf("create dcap verifier: %v", err)
+	}
+	verifier := verify.NewStrictVerifier(dcapVerifier, policy)
 	keyManager := sshkeys.NewManager(keysDir)
 	runner := flow.NewRunner(apiClient, prompter, verifier, keyManager)
 
@@ -86,4 +95,19 @@ func splitCSV(v string) []string {
 		}
 	}
 	return out
+}
+
+func parseDurationOrDefault(raw string, fallback time.Duration) time.Duration {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return fallback
+	}
+	if seconds, err := strconv.Atoi(raw); err == nil && seconds > 0 {
+		return time.Duration(seconds) * time.Second
+	}
+	dur, err := time.ParseDuration(raw)
+	if err != nil || dur <= 0 {
+		return fallback
+	}
+	return dur
 }

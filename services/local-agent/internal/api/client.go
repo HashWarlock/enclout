@@ -18,9 +18,10 @@ type Request struct {
 }
 
 type Bundle struct {
-	Payload map[string]any `json:"payload"`
-	Signature string       `json:"signature"`
-	Alg       string       `json:"alg"`
+	Payload    map[string]any `json:"payload"`
+	PayloadRaw []byte         `json:"-"`
+	Signature  string         `json:"signature"`
+	Alg        string         `json:"alg"`
 }
 
 type Client struct {
@@ -83,11 +84,26 @@ func (c *Client) GetAttestationBundle(ctx context.Context, requestID string) (Bu
 	if res.StatusCode != http.StatusOK {
 		return Bundle{}, fmt.Errorf("bundle fetch failed with status %d", res.StatusCode)
 	}
-	var out Bundle
-	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+	var raw struct {
+		Payload   json.RawMessage `json:"payload"`
+		Signature string          `json:"signature"`
+		Alg       string          `json:"alg"`
+	}
+	if err := json.NewDecoder(res.Body).Decode(&raw); err != nil {
 		return Bundle{}, err
 	}
-	return out, nil
+
+	var payload map[string]any
+	if err := json.Unmarshal(raw.Payload, &payload); err != nil {
+		return Bundle{}, err
+	}
+
+	return Bundle{
+		Payload:    payload,
+		PayloadRaw: append([]byte(nil), raw.Payload...),
+		Signature:  raw.Signature,
+		Alg:        raw.Alg,
+	}, nil
 }
 
 func (c *Client) PostResult(ctx context.Context, requestID string, status string, reasonCode string) error {

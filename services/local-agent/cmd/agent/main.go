@@ -21,6 +21,7 @@ func main() {
 	controlPlaneURL := mustEnv("CONTROL_PLANE_URL")
 	deviceID := mustEnv("DEVICE_ID")
 	localUser := mustEnv("LOCAL_USERNAME")
+	controlPlaneSigningPublicKeyB64 := mustEnv("CONTROL_PLANE_SIGNING_PUBKEY_B64")
 	token := os.Getenv("AGENT_TOKEN")
 	keysDir := os.Getenv("MANAGED_KEYS_DIR")
 	if keysDir == "" {
@@ -40,7 +41,7 @@ func main() {
 	}
 	verifier := verify.NewStrictVerifier(dcapVerifier, policy)
 	keyManager := sshkeys.NewManager(keysDir)
-	runner := flow.NewRunner(apiClient, prompter, verifier, keyManager)
+	runner := flow.NewRunner(apiClient, prompter, verifier, keyManager, controlPlaneSigningPublicKeyB64)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()

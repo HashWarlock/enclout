@@ -4,6 +4,7 @@ import "context"
 
 const (
 	ReasonAttestationDependencyFailure = "AttestationDependencyFailure"
+	ReasonBundleInvalid                = "BundleInvalid"
 	ReasonQuoteInvalid                 = "QuoteInvalid"
 	ReasonMeasurementMismatch          = "MeasurementMismatch"
 	ReasonReportDataMismatch           = "ReportDataMismatch"

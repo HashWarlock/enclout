@@ -37,18 +37,20 @@ type Request struct {
 }
 
 type Runner struct {
-	api      API
-	prompter Prompter
-	verifier Verifier
-	keys     KeyInstaller
+	api                           API
+	prompter                      Prompter
+	verifier                      Verifier
+	keys                          KeyInstaller
+	controlPlaneSigningPublicKeyB64 string
 }
 
-func NewRunner(apiClient API, prompter Prompter, verifier Verifier, keys KeyInstaller) Runner {
+func NewRunner(apiClient API, prompter Prompter, verifier Verifier, keys KeyInstaller, controlPlaneSigningPublicKeyB64 string) Runner {
 	return Runner{
-		api:      apiClient,
-		prompter: prompter,
-		verifier: verifier,
-		keys:     keys,
+		api:                            apiClient,
+		prompter:                       prompter,
+		verifier:                       verifier,
+		keys:                           keys,
+		controlPlaneSigningPublicKeyB64: controlPlaneSigningPublicKeyB64,
 	}
 }
 
@@ -73,9 +75,19 @@ func (r Runner) Process(ctx context.Context, req Request) error {
 		return err
 	}
 
+	if err := verify.VerifySignedBundle(
+		signedBundle.PayloadRaw,
+		signedBundle.Signature,
+		signedBundle.Alg,
+		r.controlPlaneSigningPublicKeyB64,
+	); err != nil {
+		_ = r.api.PostResult(ctx, req.ID, "verification_failed", verify.ReasonBundleInvalid)
+		return err
+	}
+
 	bundle, err := parseBundlePayload(signedBundle.Payload)
 	if err != nil {
-		_ = r.api.PostResult(ctx, req.ID, "verification_failed", verify.ReasonQuoteInvalid)
+		_ = r.api.PostResult(ctx, req.ID, "verification_failed", verify.ReasonBundleInvalid)
 		return err
 	}
 

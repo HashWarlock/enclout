@@ -18,6 +18,8 @@ import (
 
 const defaultLabel = "ai.enclout.agent"
 
+type installRunnerFunc func(ctx context.Context, client install.InstallerAPI, installer install.ServiceInstaller, cfg install.Config) error
+
 func main() {
 	if err := run(context.Background(), os.Args[1:], os.LookupEnv); err != nil {
 		log.Fatalf("install failed: %v", err)
@@ -25,7 +27,25 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, lookupEnv func(string) (string, bool)) error {
-	if runtime.GOOS != "darwin" {
+	return runWithDeps(
+		ctx,
+		args,
+		lookupEnv,
+		runtime.GOOS,
+		func() install.ServiceInstaller { return install.NewLaunchdInstaller() },
+		install.Run,
+	)
+}
+
+func runWithDeps(
+	ctx context.Context,
+	args []string,
+	lookupEnv func(string) (string, bool),
+	goos string,
+	newInstaller func() install.ServiceInstaller,
+	runInstall installRunnerFunc,
+) error {
+	if goos != "darwin" {
 		return errors.New("launchd installer is only supported on darwin")
 	}
 
@@ -76,8 +96,8 @@ func run(ctx context.Context, args []string, lookupEnv func(string) (string, boo
 	})
 
 	client := api.NewClient(*controlPlaneURL, *agentToken)
-	installer := install.NewLaunchdInstaller()
-	return install.Run(ctx, client, installer, install.Config{
+	installer := newInstaller()
+	return runInstall(ctx, client, installer, install.Config{
 		InstallToken: *token,
 		Label:        *label,
 		AgentBinary:  *agentBin,

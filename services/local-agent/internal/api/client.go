@@ -36,6 +36,16 @@ type SigningKeyset struct {
 	Keys      []SigningKeyInfo `json:"keys"`
 }
 
+type InstallSession struct {
+	ID             string `json:"id"`
+	OpenClawUserID string `json:"openclaw_user_id"`
+	DeviceID       string `json:"device_id"`
+	ConnectorID    string `json:"connector_id"`
+	SourceChannel  string `json:"source_channel"`
+	Status         string `json:"status"`
+	ReasonCode     string `json:"reason_code"`
+}
+
 type Client struct {
 	baseURL string
 	token   string
@@ -149,6 +159,42 @@ func (c *Client) PostResult(ctx context.Context, requestID string, status string
 		"reason_code": reasonCode,
 	}
 	return c.postJSON(ctx, "/v1/connection-requests/"+url.PathEscape(requestID)+"/result", body)
+}
+
+func (c *Client) RedeemInstallToken(ctx context.Context, token string) (InstallSession, error) {
+	body := map[string]string{"token": token}
+	raw, err := json.Marshal(body)
+	if err != nil {
+		return InstallSession{}, err
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/v1/install-sessions/redeem", bytes.NewReader(raw))
+	if err != nil {
+		return InstallSession{}, err
+	}
+	c.addHeaders(req)
+	req.Header.Set("Content-Type", "application/json")
+
+	res, err := c.http.Do(req)
+	if err != nil {
+		return InstallSession{}, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return InstallSession{}, fmt.Errorf("install token redeem failed with status %d", res.StatusCode)
+	}
+	var out InstallSession
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		return InstallSession{}, err
+	}
+	return out, nil
+}
+
+func (c *Client) PostInstallResult(ctx context.Context, sessionID string, status string, reasonCode string) error {
+	body := map[string]string{
+		"status":      status,
+		"reason_code": reasonCode,
+	}
+	return c.postJSON(ctx, "/v1/install-sessions/"+url.PathEscape(sessionID)+"/result", body)
 }
 
 func (c *Client) postJSON(ctx context.Context, path string, body any) error {

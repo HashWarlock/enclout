@@ -93,3 +93,49 @@ func TestGetSigningKeyset(t *testing.T) {
 		t.Fatalf("expected 2 keys, got %d", len(keyset.Keys))
 	}
 }
+
+func TestRedeemInstallToken(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"id":"ins_1","openclaw_user_id":"usr_1","device_id":"dev_1","connector_id":"conn_1","source_channel":"telegram","status":"approved"}`)
+	}))
+	defer srv.Close()
+
+	client := NewClient(srv.URL, "token")
+	session, err := client.RedeemInstallToken(context.Background(), "tok_1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if session.ID != "ins_1" {
+		t.Fatalf("unexpected session id: %q", session.ID)
+	}
+	if session.Status != "approved" {
+		t.Fatalf("unexpected session status: %q", session.Status)
+	}
+}
+
+func TestPostInstallResult(t *testing.T) {
+	var gotPath string
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		raw, _ := io.ReadAll(r.Body)
+		gotBody = string(raw)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	client := NewClient(srv.URL, "token")
+	err := client.PostInstallResult(context.Background(), "ins_1", "failed", "LaunchdInstallError")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotPath != "/v1/install-sessions/ins_1/result" {
+		t.Fatalf("unexpected path: %s", gotPath)
+	}
+	if !strings.Contains(gotBody, `"status":"failed"`) {
+		t.Fatalf("unexpected body: %s", gotBody)
+	}
+	if !strings.Contains(gotBody, `"reason_code":"LaunchdInstallError"`) {
+		t.Fatalf("unexpected body: %s", gotBody)
+	}
+}

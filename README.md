@@ -103,3 +103,20 @@ Optional:
 - `MANAGED_KEYS_DIR` (default `/var/lib/connector-agent/keys`)
 - `ALLOW_MRTD` (comma-separated allowlist)
 - `ALLOW_RTMR3` (comma-separated allowlist)
+
+## macOS Launchd Install Bootstrap
+
+For launchd-first bootstrap on macOS:
+
+1. Request install from any paired chat channel through OpenClaw intent `request_connector_install`.
+2. Use the returned one-time `install_token` and run:
+
+```bash
+CONTROL_PLANE_URL=http://127.0.0.1:8080 \
+DCAP_VERIFIER_URL=http://127.0.0.1:9000 \
+go run ./services/local-agent/cmd/install -- \
+  -token "<install_token>" \
+  -agent-bin "/usr/local/bin/enclout-agent"
+```
+
+3. Installer redeems token, configures a `launchd` job, starts the agent, and posts install result (`installed` or `failed`) back to control plane.

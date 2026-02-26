@@ -31,6 +31,23 @@ Describe the operator sequence for channel-initiated connector access with local
 8. If verification fails, local agent posts `verification_failed` with reason code.
 9. Channel receives final state from orchestrator.
 
+## Install Bootstrap Flow (macOS Launchd First)
+
+1. User requests install from a paired channel:
+   - `request_connector_install(connector_id, device_id?)`
+2. Control plane creates install session (`requested`) and returns one-time `install_token`.
+3. OpenClaw agent approves install session:
+   - `approve_install_session(install_session_id, approved=true)`
+4. On device, user runs local installer with token (`cmd/install`).
+5. Installer redeems token once:
+   - valid + approved -> session details returned
+   - invalid/replayed/expired -> fail closed
+6. Installer writes `launchd` plist and starts local agent service.
+7. Installer posts install result:
+   - `installed` on success
+   - `failed` with reason code on failure
+8. Channel receives install outcome and can proceed with normal `request_connector_access`.
+
 ## Operational Checks
 
 - Check `/healthz` on control plane.

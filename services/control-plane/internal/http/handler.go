@@ -21,6 +21,11 @@ type RequestStore interface {
 	SetLocalDecision(id string, approved bool) (requests.ConnectionRequest, error)
 	SetResult(id string, status requests.Status, reasonCode string) (requests.ConnectionRequest, error)
 	ListPendingForDevice(deviceID string) []requests.ConnectionRequest
+	CreateInstallSession(in requests.CreateInstallInput) (requests.InstallSession, string, error)
+	GetInstallSession(id string) (requests.InstallSession, error)
+	SetInstallApproval(id string, approved bool) (requests.InstallSession, error)
+	SetInstallResult(id string, status requests.InstallStatus, reasonCode string) (requests.InstallSession, error)
+	RedeemInstallToken(token string) (requests.InstallSession, error)
 }
 
 type BundleTemplate struct {

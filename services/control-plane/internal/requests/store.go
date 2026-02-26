@@ -1,8 +1,11 @@
 package requests
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
+	"strings"
 	"sync"
 	"time"
 )
@@ -22,9 +25,11 @@ type realClock struct{}
 func (realClock) Now() time.Time { return time.Now() }
 
 type InMemoryStore struct {
-	mu    sync.RWMutex
-	items map[string]ConnectionRequest
-	clock clock
+	mu              sync.RWMutex
+	items           map[string]ConnectionRequest
+	installSessions map[string]InstallSession
+	installTokens   map[string]string
+	clock           clock
 }
 
 func NewInMemoryStore() *InMemoryStore {
@@ -33,8 +38,10 @@ func NewInMemoryStore() *InMemoryStore {
 
 func NewInMemoryStoreWithClock(c clock) *InMemoryStore {
 	return &InMemoryStore{
-		items: map[string]ConnectionRequest{},
-		clock: c,
+		items:           map[string]ConnectionRequest{},
+		installSessions: map[string]InstallSession{},
+		installTokens:   map[string]string{},
+		clock:           c,
 	}
 }
 
@@ -161,4 +168,165 @@ func (s *InMemoryStore) expireIfNeeded(req ConnectionRequest) ConnectionRequest 
 		req.Status = StatusExpired
 	}
 	return req
+}
+
+func (s *InMemoryStore) CreateInstallSession(in CreateInstallInput) (InstallSession, string, error) {
+	if in.OpenClawUserID == "" || in.DeviceID == "" || in.ConnectorID == "" {
+		return InstallSession{}, "", fmt.Errorf("missing required fields")
+	}
+	if in.TTL <= 0 {
+		return InstallSession{}, "", fmt.Errorf("ttl must be positive")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	now := s.now()
+	session := InstallSession{
+		ID:             randomID(),
+		OpenClawUserID: in.OpenClawUserID,
+		DeviceID:       in.DeviceID,
+		ConnectorID:    in.ConnectorID,
+		SourceChannel:  in.SourceChannel,
+		Status:         InstallStatusRequested,
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(in.TTL),
+	}
+	token := randomID()
+	tokenDigest := digestInstallToken(token)
+
+	s.installSessions[session.ID] = session
+	s.installTokens[tokenDigest] = session.ID
+
+	return session, token, nil
+}
+
+func (s *InMemoryStore) GetInstallSession(id string) (InstallSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, ok := s.installSessions[id]
+	if !ok {
+		return InstallSession{}, ErrNotFound
+	}
+
+	session, expired := s.expireInstallIfNeeded(session)
+	if expired {
+		s.deleteInstallTokensForSessionLocked(session.ID)
+	}
+	s.installSessions[id] = session
+
+	return session, nil
+}
+
+func (s *InMemoryStore) SetInstallApproval(id string, approved bool) (InstallSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, ok := s.installSessions[id]
+	if !ok {
+		return InstallSession{}, ErrNotFound
+	}
+	session, expired := s.expireInstallIfNeeded(session)
+	if expired {
+		s.deleteInstallTokensForSessionLocked(session.ID)
+		s.installSessions[id] = session
+		return session, ErrExpired
+	}
+	if session.Status != InstallStatusRequested {
+		return InstallSession{}, ErrInvalidTransition
+	}
+
+	if approved {
+		session.Status = InstallStatusApproved
+	} else {
+		session.Status = InstallStatusFailed
+		session.ReasonCode = "Denied"
+		s.deleteInstallTokensForSessionLocked(session.ID)
+	}
+
+	s.installSessions[id] = session
+	return session, nil
+}
+
+func (s *InMemoryStore) SetInstallResult(id string, status InstallStatus, reasonCode string) (InstallSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, ok := s.installSessions[id]
+	if !ok {
+		return InstallSession{}, ErrNotFound
+	}
+	session, expired := s.expireInstallIfNeeded(session)
+	if expired {
+		s.deleteInstallTokensForSessionLocked(session.ID)
+		s.installSessions[id] = session
+		return session, ErrExpired
+	}
+	if session.Status != InstallStatusApproved {
+		return InstallSession{}, ErrInvalidTransition
+	}
+	if status != InstallStatusInstalled && status != InstallStatusFailed {
+		return InstallSession{}, ErrInvalidTransition
+	}
+
+	session.Status = status
+	session.ReasonCode = reasonCode
+	s.installSessions[id] = session
+	s.deleteInstallTokensForSessionLocked(session.ID)
+	return session, nil
+}
+
+func (s *InMemoryStore) RedeemInstallToken(token string) (InstallSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	sessionID, ok := s.installTokens[digestInstallToken(token)]
+	if !ok {
+		return InstallSession{}, ErrNotFound
+	}
+
+	session, ok := s.installSessions[sessionID]
+	if !ok {
+		return InstallSession{}, ErrNotFound
+	}
+	session, expired := s.expireInstallIfNeeded(session)
+	if expired {
+		s.deleteInstallTokensForSessionLocked(session.ID)
+		s.installSessions[sessionID] = session
+		return session, ErrExpired
+	}
+	if session.Status != InstallStatusApproved {
+		return InstallSession{}, ErrInvalidTransition
+	}
+
+	s.deleteInstallTokensForSessionLocked(session.ID)
+	return session, nil
+}
+
+func (s *InMemoryStore) expireInstallIfNeeded(session InstallSession) (InstallSession, bool) {
+	now := s.now()
+	if now.After(session.ExpiresAt) &&
+		session.Status != InstallStatusInstalled &&
+		session.Status != InstallStatusFailed {
+		session.Status = InstallStatusFailed
+		if session.ReasonCode == "" {
+			session.ReasonCode = "Expired"
+		}
+		return session, true
+	}
+	return session, false
+}
+
+func (s *InMemoryStore) deleteInstallTokensForSessionLocked(sessionID string) {
+	for tokenDigest, sid := range s.installTokens {
+		if sid == sessionID {
+			delete(s.installTokens, tokenDigest)
+		}
+	}
+}
+
+func digestInstallToken(token string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(token)))
+	return hex.EncodeToString(sum[:])
 }

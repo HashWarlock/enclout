@@ -50,6 +50,18 @@ func main() {
 			http.NotFound(w, r)
 		}
 	})
+	mux.HandleFunc("/v1/install-sessions", requireAuth(methodOnly(http.MethodPost, api.CreateInstallSession)))
+	mux.HandleFunc("/v1/install-sessions/redeem", requireAuth(methodOnly(http.MethodPost, api.RedeemInstallToken)))
+	mux.HandleFunc("/v1/install-sessions/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/approval") && r.Method == http.MethodPost:
+			requireAuth(api.InstallSessionApproval)(w, r)
+		case strings.HasSuffix(r.URL.Path, "/result") && r.Method == http.MethodPost:
+			requireAuth(api.InstallSessionResult)(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
 	mux.HandleFunc("/v1/devices/", requireAuth(methodOnly(http.MethodGet, api.ListPendingRequestsForDevice)))
 	mux.HandleFunc("/v1/openclaw/intents", requireAuth(methodOnly(http.MethodPost, openClawHandler.Handle)))
 	mux.HandleFunc("/v1/signing-keys", requireAuth(methodOnly(http.MethodGet, api.SigningKeys)))

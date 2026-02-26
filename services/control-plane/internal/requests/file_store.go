@@ -9,7 +9,9 @@ import (
 )
 
 type fileStoreState struct {
-	Items map[string]ConnectionRequest `json:"items"`
+	Items           map[string]ConnectionRequest `json:"items"`
+	InstallSessions map[string]InstallSession    `json:"install_sessions"`
+	InstallTokens   map[string]string            `json:"install_tokens"`
 }
 
 type FileStore struct {
@@ -98,6 +100,74 @@ func (s *FileStore) SetResult(id string, status Status, reasonCode string) (Conn
 	return req, nil
 }
 
+func (s *FileStore) CreateInstallSession(in CreateInstallInput) (InstallSession, string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, token, err := s.mem.CreateInstallSession(in)
+	if err != nil {
+		return InstallSession{}, "", err
+	}
+	if err := s.persistLocked(); err != nil {
+		return InstallSession{}, "", err
+	}
+	return session, token, nil
+}
+
+func (s *FileStore) GetInstallSession(id string) (InstallSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, err := s.mem.GetInstallSession(id)
+	if err != nil {
+		return InstallSession{}, err
+	}
+	_ = s.persistLocked()
+	return session, nil
+}
+
+func (s *FileStore) SetInstallApproval(id string, approved bool) (InstallSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, err := s.mem.SetInstallApproval(id, approved)
+	if err != nil {
+		return InstallSession{}, err
+	}
+	if err := s.persistLocked(); err != nil {
+		return InstallSession{}, err
+	}
+	return session, nil
+}
+
+func (s *FileStore) SetInstallResult(id string, status InstallStatus, reasonCode string) (InstallSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, err := s.mem.SetInstallResult(id, status, reasonCode)
+	if err != nil {
+		return InstallSession{}, err
+	}
+	if err := s.persistLocked(); err != nil {
+		return InstallSession{}, err
+	}
+	return session, nil
+}
+
+func (s *FileStore) RedeemInstallToken(token string) (InstallSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, err := s.mem.RedeemInstallToken(token)
+	if err != nil {
+		return InstallSession{}, err
+	}
+	if err := s.persistLocked(); err != nil {
+		return InstallSession{}, err
+	}
+	return session, nil
+}
+
 func (s *FileStore) load() error {
 	raw, err := os.ReadFile(s.path)
 	if err != nil {
@@ -114,14 +184,24 @@ func (s *FileStore) load() error {
 	if state.Items == nil {
 		state.Items = map[string]ConnectionRequest{}
 	}
+	if state.InstallSessions == nil {
+		state.InstallSessions = map[string]InstallSession{}
+	}
+	if state.InstallTokens == nil {
+		state.InstallTokens = map[string]string{}
+	}
 
 	s.mem.items = state.Items
+	s.mem.installSessions = state.InstallSessions
+	s.mem.installTokens = state.InstallTokens
 	return nil
 }
 
 func (s *FileStore) persistLocked() error {
 	state := fileStoreState{
-		Items: s.mem.items,
+		Items:           s.mem.items,
+		InstallSessions: s.mem.installSessions,
+		InstallTokens:   s.mem.installTokens,
 	}
 
 	raw, err := json.Marshal(state)

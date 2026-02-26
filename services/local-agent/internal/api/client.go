@@ -25,6 +25,17 @@ type Bundle struct {
 	KID        string         `json:"kid"`
 }
 
+type SigningKeyInfo struct {
+	KID          string `json:"kid"`
+	Alg          string `json:"alg"`
+	PublicKeyB64 string `json:"public_key_b64"`
+}
+
+type SigningKeyset struct {
+	ActiveKID string           `json:"active_kid"`
+	Keys      []SigningKeyInfo `json:"keys"`
+}
+
 type Client struct {
 	baseURL string
 	token   string
@@ -107,6 +118,29 @@ func (c *Client) GetAttestationBundle(ctx context.Context, requestID string) (Bu
 		Alg:        raw.Alg,
 		KID:        raw.KID,
 	}, nil
+}
+
+func (c *Client) GetSigningKeyset(ctx context.Context) (SigningKeyset, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/v1/signing-keys", nil)
+	if err != nil {
+		return SigningKeyset{}, err
+	}
+	c.addHeaders(req)
+
+	res, err := c.http.Do(req)
+	if err != nil {
+		return SigningKeyset{}, err
+	}
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		return SigningKeyset{}, fmt.Errorf("signing keys fetch failed with status %d", res.StatusCode)
+	}
+
+	var out SigningKeyset
+	if err := json.NewDecoder(res.Body).Decode(&out); err != nil {
+		return SigningKeyset{}, err
+	}
+	return out, nil
 }
 
 func (c *Client) PostResult(ctx context.Context, requestID string, status string, reasonCode string) error {

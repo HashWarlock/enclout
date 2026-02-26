@@ -74,3 +74,22 @@ func TestGetAttestationBundleIncludesRawPayloadForSignatureVerification(t *testi
 		t.Fatalf("expected bundle kid v1, got %q", bundle.KID)
 	}
 }
+
+func TestGetSigningKeyset(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		fmt.Fprint(w, `{"active_kid":"v2","keys":[{"kid":"v1","alg":"ed25519","public_key_b64":"AAAA"},{"kid":"v2","alg":"ed25519","public_key_b64":"BBBB"}]}`)
+	}))
+	defer srv.Close()
+
+	client := NewClient(srv.URL, "token")
+	keyset, err := client.GetSigningKeyset(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if keyset.ActiveKID != "v2" {
+		t.Fatalf("expected active_kid v2, got %q", keyset.ActiveKID)
+	}
+	if len(keyset.Keys) != 2 {
+		t.Fatalf("expected 2 keys, got %d", len(keyset.Keys))
+	}
+}

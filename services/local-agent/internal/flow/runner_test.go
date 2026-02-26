@@ -77,12 +77,31 @@ func (k *fakeKeys) Install(_ string, _ string) error {
 	return nil
 }
 
+type fakeSigningKeys struct {
+	keys  map[string]string
+	err   error
+	calls int
+}
+
+func (f *fakeSigningKeys) TrustedKeys(_ context.Context) (map[string]string, error) {
+	f.calls++
+	if f.err != nil {
+		return nil, f.err
+	}
+	out := make(map[string]string, len(f.keys))
+	for kid, key := range f.keys {
+		out[kid] = key
+	}
+	return out, nil
+}
+
 func TestRunnerHappyPath(t *testing.T) {
 	bundle, publicKeyB64 := signedBundleFixture(t, false)
 	apiClient := &fakeAPI{bundle: bundle}
 	keys := &fakeKeys{}
 	quoteVerifier := &fakeVerifier{decision: verify.Decision{Trusted: true}}
-	r := NewRunner(apiClient, fakePrompter{approved: true}, quoteVerifier, keys, map[string]string{"v1": publicKeyB64})
+	signingKeys := &fakeSigningKeys{keys: map[string]string{"v1": publicKeyB64}}
+	r := NewRunner(apiClient, fakePrompter{approved: true}, quoteVerifier, keys, signingKeys)
 
 	err := r.Process(context.Background(), Request{
 		ID:          "req_1",
@@ -101,6 +120,9 @@ func TestRunnerHappyPath(t *testing.T) {
 	if quoteVerifier.calls != 1 {
 		t.Fatalf("expected quote verifier to run exactly once")
 	}
+	if signingKeys.calls != 1 {
+		t.Fatalf("expected trusted keyset lookup to run exactly once")
+	}
 	if !keys.installed {
 		t.Fatalf("expected ssh key installation")
 	}
@@ -115,7 +137,8 @@ func TestRunnerVerificationFailure(t *testing.T) {
 	keys := &fakeKeys{}
 	verr := verify.VerificationError{Code: verify.ReasonReportDataMismatch, Err: errors.New("mismatch")}
 	quoteVerifier := &fakeVerifier{err: verr}
-	r := NewRunner(apiClient, fakePrompter{approved: true}, quoteVerifier, keys, map[string]string{"v1": publicKeyB64})
+	signingKeys := &fakeSigningKeys{keys: map[string]string{"v1": publicKeyB64}}
+	r := NewRunner(apiClient, fakePrompter{approved: true}, quoteVerifier, keys, signingKeys)
 
 	err := r.Process(context.Background(), Request{
 		ID:          "req_1",
@@ -138,7 +161,8 @@ func TestRunnerRejectsInvalidBundleSignatureBeforeQuoteChecks(t *testing.T) {
 	apiClient := &fakeAPI{bundle: bundle}
 	keys := &fakeKeys{}
 	quoteVerifier := &fakeVerifier{decision: verify.Decision{Trusted: true}}
-	r := NewRunner(apiClient, fakePrompter{approved: true}, quoteVerifier, keys, map[string]string{"v1": publicKeyB64})
+	signingKeys := &fakeSigningKeys{keys: map[string]string{"v1": publicKeyB64}}
+	r := NewRunner(apiClient, fakePrompter{approved: true}, quoteVerifier, keys, signingKeys)
 
 	err := r.Process(context.Background(), Request{
 		ID:          "req_1",
@@ -168,9 +192,10 @@ func TestRunnerRejectsUnknownKIDBeforeQuoteChecks(t *testing.T) {
 	apiClient := &fakeAPI{bundle: bundle}
 	keys := &fakeKeys{}
 	quoteVerifier := &fakeVerifier{decision: verify.Decision{Trusted: true}}
-	r := NewRunner(apiClient, fakePrompter{approved: true}, quoteVerifier, keys, map[string]string{
+	signingKeys := &fakeSigningKeys{keys: map[string]string{
 		"v1": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=",
-	})
+	}}
+	r := NewRunner(apiClient, fakePrompter{approved: true}, quoteVerifier, keys, signingKeys)
 
 	err := r.Process(context.Background(), Request{
 		ID:          "req_1",
@@ -188,6 +213,36 @@ func TestRunnerRejectsUnknownKIDBeforeQuoteChecks(t *testing.T) {
 	}
 	if quoteVerifier.calls != 0 {
 		t.Fatalf("expected quote verifier not to run on unknown kid")
+	}
+}
+
+func TestRunnerFailsClosedWhenSigningKeysetUnavailableBeforeQuoteChecks(t *testing.T) {
+	bundle, _ := signedBundleFixture(t, false)
+	apiClient := &fakeAPI{bundle: bundle}
+	keys := &fakeKeys{}
+	quoteVerifier := &fakeVerifier{decision: verify.Decision{Trusted: true}}
+	signingKeys := &fakeSigningKeys{err: errors.New("keyset endpoint unavailable")}
+	r := NewRunner(apiClient, fakePrompter{approved: true}, quoteVerifier, keys, signingKeys)
+
+	err := r.Process(context.Background(), Request{
+		ID:          "req_1",
+		ConnectorID: "conn_1",
+		LocalUser:   "alice",
+	})
+	if err == nil {
+		t.Fatalf("expected keyset lookup failure")
+	}
+	if apiClient.resultStatus != "verification_failed" {
+		t.Fatalf("expected verification_failed status")
+	}
+	if apiClient.resultReason != verify.ReasonBundleInvalid {
+		t.Fatalf("expected %q, got %q", verify.ReasonBundleInvalid, apiClient.resultReason)
+	}
+	if quoteVerifier.calls != 0 {
+		t.Fatalf("expected quote verifier not to run on keyset lookup failure")
+	}
+	if keys.installed {
+		t.Fatalf("expected no key installation on keyset lookup failure")
 	}
 }
 

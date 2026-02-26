@@ -16,6 +16,7 @@ import (
 	"enclout/services/local-agent/internal/approval"
 	"enclout/services/local-agent/internal/flow"
 	"enclout/services/local-agent/internal/sshkeys"
+	"enclout/services/local-agent/internal/trust"
 	"enclout/services/local-agent/internal/verify"
 )
 
@@ -46,7 +47,12 @@ func main() {
 	}
 	verifier := verify.NewStrictVerifier(dcapVerifier, policy)
 	keyManager := sshkeys.NewManager(keysDir)
-	runner := flow.NewRunner(apiClient, prompter, verifier, keyManager, controlPlaneSigningKeysB64)
+	signingKeysetCacheTTL := parseDurationOrDefault(
+		os.Getenv("SIGNING_KEYSET_CACHE_TTL"),
+		trust.DefaultKeysetCacheTTL,
+	)
+	signingKeys := trust.NewKeysetSource(apiClient, controlPlaneSigningKeysB64, signingKeysetCacheTTL)
+	runner := flow.NewRunner(apiClient, prompter, verifier, keyManager, signingKeys)
 
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
@@ -124,7 +130,7 @@ func loadTrustedControlPlaneSigningKeysFromEnv() (map[string]string, error) {
 	// Backward-compatible single-key mode.
 	pub := strings.TrimSpace(os.Getenv("CONTROL_PLANE_SIGNING_PUBKEY_B64"))
 	if pub == "" {
-		return nil, fmt.Errorf("missing CONTROL_PLANE_SIGNING_KEYS_JSON or CONTROL_PLANE_SIGNING_PUBKEY_B64")
+		return nil, nil
 	}
 	kid := strings.TrimSpace(os.Getenv("CONTROL_PLANE_SIGNING_KID"))
 	if kid == "" {

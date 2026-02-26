@@ -8,13 +8,14 @@ Rotate control-plane attestation signing keys without breaking local-agent verif
 
 - Control plane and local agents are running versions that support bundle `kid` and keysets.
 - Current and next signing seeds are prepared securely.
-- You can update environment variables on control plane and local agents.
+- You can update control-plane environment variables and local-agent runtime config.
 
 ## Data Model
 
 - Control plane signs bundles with `kid`.
 - Control plane exposes trusted keyset at `GET /v1/signing-keys`.
-- Local agent verifies bundle signature by `kid` against trusted key map.
+- Local agent verifies bundle signature by `kid` against a cached trusted key map.
+- Local agent refreshes the keyset from control plane on cache expiry (`SIGNING_KEYSET_CACHE_TTL`, default `5m`).
 
 ## Required Configuration
 
@@ -25,7 +26,11 @@ Control plane:
 
 Local agent:
 
-- `CONTROL_PLANE_SIGNING_KEYS_JSON` as `{"v1":"<pubkey_b64>","v2":"<pubkey_b64>"...}`
+- Optional bootstrap keyset:
+  - `CONTROL_PLANE_SIGNING_KEYS_JSON` as `{"v1":"<pubkey_b64>","v2":"<pubkey_b64>"...}`
+  - or `CONTROL_PLANE_SIGNING_PUBKEY_B64` (+ optional `CONTROL_PLANE_SIGNING_KID`)
+- Optional cache override:
+  - `SIGNING_KEYSET_CACHE_TTL` (seconds or duration string)
 
 ## Safe Rotation Procedure (N to N+1)
 
@@ -34,13 +39,13 @@ Local agent:
 3. Update control plane `SIGNING_KEYS_JSON` to include both `v1` and `v2`.
 4. Keep `SIGNING_ACTIVE_KID=v1`.
 5. Deploy control plane config and verify `GET /v1/signing-keys` returns both keys.
-6. Update local agents with both public keys in `CONTROL_PLANE_SIGNING_KEYS_JSON`.
-7. Confirm local agents are healthy and verifying bundles.
+6. Confirm local agents can reach `GET /v1/signing-keys`; if needed, pre-seed bootstrap keys.
+7. Confirm local agents are healthy and refreshing keysets without `BundleInvalid`.
 8. Switch control plane to `SIGNING_ACTIVE_KID=v2`.
 9. Verify new bundles contain `"kid":"v2"` and local agents accept them.
 10. Keep overlap window (recommended 24 hours minimum).
-11. Remove `v1` from local agents after overlap window and verification.
-12. Remove `v1` from control plane keyset after all agents are updated.
+11. Keep overlap window (recommended 24 hours minimum or at least greater than keyset cache TTL).
+12. Remove `v1` from control plane keyset after overlap window and verification.
 
 ## Verification Checklist
 
@@ -59,8 +64,8 @@ Local agent:
 ## Failure Modes
 
 - Unknown `kid` on agent:
-  - Cause: control plane switched to new key before agents received keyset.
-  - Fix: add missing `kid` public key to agents or roll back active `kid`.
+  - Cause: control plane switched to new key before agent cache refresh/overlap completed.
+  - Fix: restore overlap keys, wait for cache refresh (or lower TTL/restart agents), then reattempt switch.
 - Signature mismatch:
   - Cause: wrong key material, payload tampering, or malformed key map.
   - Fix: validate key mapping and signer source, then redeploy.

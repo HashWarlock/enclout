@@ -30,6 +30,10 @@ type KeyInstaller interface {
 	Install(username string, pubKey string) error
 }
 
+type TrustedSigningKeys interface {
+	TrustedKeys(ctx context.Context) (map[string]string, error)
+}
+
 type Request struct {
 	ID          string
 	ConnectorID string
@@ -37,24 +41,20 @@ type Request struct {
 }
 
 type Runner struct {
-	api                        API
-	prompter                   Prompter
-	verifier                   Verifier
-	keys                       KeyInstaller
-	controlPlaneSigningKeysB64 map[string]string
+	api         API
+	prompter    Prompter
+	verifier    Verifier
+	keys        KeyInstaller
+	signingKeys TrustedSigningKeys
 }
 
-func NewRunner(apiClient API, prompter Prompter, verifier Verifier, keys KeyInstaller, controlPlaneSigningKeysB64 map[string]string) Runner {
-	keysetCopy := make(map[string]string, len(controlPlaneSigningKeysB64))
-	for kid, key := range controlPlaneSigningKeysB64 {
-		keysetCopy[kid] = key
-	}
+func NewRunner(apiClient API, prompter Prompter, verifier Verifier, keys KeyInstaller, signingKeys TrustedSigningKeys) Runner {
 	return Runner{
-		api:                        apiClient,
-		prompter:                   prompter,
-		verifier:                   verifier,
-		keys:                       keys,
-		controlPlaneSigningKeysB64: keysetCopy,
+		api:         apiClient,
+		prompter:    prompter,
+		verifier:    verifier,
+		keys:        keys,
+		signingKeys: signingKeys,
 	}
 }
 
@@ -79,12 +79,22 @@ func (r Runner) Process(ctx context.Context, req Request) error {
 		return err
 	}
 
+	if r.signingKeys == nil {
+		_ = r.api.PostResult(ctx, req.ID, "verification_failed", verify.ReasonBundleInvalid)
+		return fmt.Errorf("trusted signing key source is not configured")
+	}
+	trustedKeys, err := r.signingKeys.TrustedKeys(ctx)
+	if err != nil {
+		_ = r.api.PostResult(ctx, req.ID, "verification_failed", verify.ReasonBundleInvalid)
+		return err
+	}
+
 	if err := verify.VerifySignedBundleWithKeyset(
 		signedBundle.PayloadRaw,
 		signedBundle.Signature,
 		signedBundle.Alg,
 		signedBundle.KID,
-		r.controlPlaneSigningKeysB64,
+		trustedKeys,
 	); err != nil {
 		_ = r.api.PostResult(ctx, req.ID, "verification_failed", verify.ReasonBundleInvalid)
 		return err

@@ -82,13 +82,18 @@ Required:
 - `LOCAL_USERNAME`
 - `DCAP_VERIFIER_URL`
 
-Control-plane signing trust configuration (choose one):
+Control-plane signing trust bootstrap (optional):
 
-- Keyset mode:
+- Keyset bootstrap:
   - `CONTROL_PLANE_SIGNING_KEYS_JSON` (JSON object of `kid -> public_key_b64`)
-- Single key mode (backward compatible):
+- Single key bootstrap (backward compatible):
   - `CONTROL_PLANE_SIGNING_PUBKEY_B64`
   - Optional `CONTROL_PLANE_SIGNING_KID` (default `v1`)
+
+Runtime keyset refresh:
+
+- Local agent fetches `GET /v1/signing-keys` and caches trusted keys.
+- `SIGNING_KEYSET_CACHE_TTL` (seconds or duration string, default `5m`)
 
 Optional:
 

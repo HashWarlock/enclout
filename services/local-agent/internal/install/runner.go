@@ -14,6 +14,7 @@ const (
 
 	InstallFailureInvalidConfig = "InvalidConfig"
 	InstallFailureLaunchd       = "LaunchdInstallError"
+	InstallFailureSystemd       = "SystemdInstallError"
 )
 
 type InstallerAPI interface {
@@ -37,7 +38,10 @@ type Config struct {
 	Label        string
 	AgentBinary  string
 	PlistPath    string
-	Env          map[string]string
+	// InstallFailureReason is reported when service installation fails.
+	// Defaults to InstallFailureLaunchd to preserve backward compatibility.
+	InstallFailureReason string
+	Env                  map[string]string
 }
 
 func Run(ctx context.Context, client InstallerAPI, installer ServiceInstaller, cfg Config) error {
@@ -62,8 +66,13 @@ func Run(ctx context.Context, client InstallerAPI, installer ServiceInstaller, c
 		Env:         env,
 	}
 
+	installFailureReason := strings.TrimSpace(cfg.InstallFailureReason)
+	if installFailureReason == "" {
+		installFailureReason = InstallFailureLaunchd
+	}
+
 	if err := installer.InstallAndStart(ctx, serviceCfg); err != nil {
-		return failInstall(ctx, client, session.ID, InstallFailureLaunchd, err)
+		return failInstall(ctx, client, session.ID, installFailureReason, err)
 	}
 
 	return client.PostInstallResult(ctx, session.ID, InstallStatusInstalled, "")
@@ -71,13 +80,13 @@ func Run(ctx context.Context, client InstallerAPI, installer ServiceInstaller, c
 
 func validateConfig(cfg Config, env map[string]string) error {
 	if strings.TrimSpace(cfg.Label) == "" {
-		return fmt.Errorf("missing launchd label")
+		return fmt.Errorf("missing service label")
 	}
 	if strings.TrimSpace(cfg.AgentBinary) == "" {
 		return fmt.Errorf("missing agent binary")
 	}
 	if strings.TrimSpace(cfg.PlistPath) == "" {
-		return fmt.Errorf("missing plist path")
+		return fmt.Errorf("missing service file path")
 	}
 	for _, key := range []string{"CONTROL_PLANE_URL", "DEVICE_ID", "LOCAL_USERNAME", "DCAP_VERIFIER_URL"} {
 		if strings.TrimSpace(env[key]) == "" {

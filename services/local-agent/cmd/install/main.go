@@ -27,12 +27,16 @@ func main() {
 }
 
 func run(ctx context.Context, args []string, lookupEnv func(string) (string, bool)) error {
+	newInstaller, err := installerFactoryForGOOS(runtime.GOOS)
+	if err != nil {
+		return err
+	}
 	return runWithDeps(
 		ctx,
 		args,
 		lookupEnv,
 		runtime.GOOS,
-		func() install.ServiceInstaller { return install.NewLaunchdInstaller() },
+		newInstaller,
 		install.Run,
 	)
 }
@@ -45,19 +49,20 @@ func runWithDeps(
 	newInstaller func() install.ServiceInstaller,
 	runInstall installRunnerFunc,
 ) error {
-	if goos != "darwin" {
-		return errors.New("launchd installer is only supported on darwin")
+	if goos != "darwin" && goos != "linux" {
+		return fmt.Errorf("installer is only supported on darwin or linux, got %s", goos)
 	}
 
 	fs := flag.NewFlagSet("install", flag.ContinueOnError)
 	token := fs.String("token", "", "one-time install token")
 	agentBin := fs.String("agent-bin", "", "path to local-agent binary")
-	label := fs.String("label", defaultLabel, "launchd label")
+	label := fs.String("label", defaultLabel, "service label")
 	controlPlaneURL := fs.String("control-plane-url", envOrEmpty(lookupEnv, "CONTROL_PLANE_URL"), "control-plane base url")
 	agentToken := fs.String("agent-token", envOrEmpty(lookupEnv, "AGENT_TOKEN"), "control-plane API bearer token")
 	localUsername := fs.String("local-username", envOrEmpty(lookupEnv, "LOCAL_USERNAME"), "local account username")
 	dcapVerifierURL := fs.String("dcap-verifier-url", envOrEmpty(lookupEnv, "DCAP_VERIFIER_URL"), "dcap verifier base url")
-	plistPath := fs.String("plist-path", "", "launch agent plist path")
+	servicePath := fs.String("service-path", "", "service file path")
+	plistPath := fs.String("plist-path", "", "deprecated alias for -service-path")
 	fs.SetOutput(os.Stderr)
 	if err := fs.Parse(args); err != nil {
 		return err
@@ -83,12 +88,23 @@ func runWithDeps(
 		*localUsername = u.Username
 	}
 
-	if strings.TrimSpace(*plistPath) == "" {
+	resolvedServicePath := strings.TrimSpace(*servicePath)
+	if resolvedServicePath == "" {
+		resolvedServicePath = strings.TrimSpace(*plistPath)
+	}
+	if resolvedServicePath == "" {
 		home := envOrEmpty(lookupEnv, "HOME")
 		if home == "" {
-			return errors.New("missing HOME for default plist path; set -plist-path")
+			return errors.New("missing HOME for default service path; set -service-path")
 		}
-		*plistPath = defaultPlistPath(home, *label)
+		switch goos {
+		case "darwin":
+			resolvedServicePath = defaultPlistPath(home, *label)
+		case "linux":
+			resolvedServicePath = defaultSystemdUnitPath(home, *label)
+		default:
+			return fmt.Errorf("unsupported goos %s", goos)
+		}
 	}
 
 	env := buildInstallEnv(*localUsername, *controlPlaneURL, *dcapVerifierURL, func(key string) string {
@@ -98,16 +114,24 @@ func runWithDeps(
 	client := api.NewClient(*controlPlaneURL, *agentToken)
 	installer := newInstaller()
 	return runInstall(ctx, client, installer, install.Config{
-		InstallToken: *token,
-		Label:        *label,
-		AgentBinary:  *agentBin,
-		PlistPath:    *plistPath,
-		Env:          env,
+		InstallToken:         *token,
+		Label:                *label,
+		AgentBinary:          *agentBin,
+		PlistPath:            resolvedServicePath,
+		InstallFailureReason: installFailureReasonForGOOS(goos),
+		Env:                  env,
 	})
 }
 
 func defaultPlistPath(home string, label string) string {
 	return filepath.Join(home, "Library", "LaunchAgents", label+".plist")
+}
+
+func defaultSystemdUnitPath(home string, label string) string {
+	if !strings.HasSuffix(label, ".service") {
+		label += ".service"
+	}
+	return filepath.Join(home, ".config", "systemd", "user", label)
 }
 
 func buildInstallEnv(localUsername string, controlPlaneURL string, dcapVerifierURL string, getenv func(string) string) map[string]string {
@@ -142,4 +166,24 @@ func envOrEmpty(lookupEnv func(string) (string, bool), key string) string {
 		return v
 	}
 	return ""
+}
+
+func installerFactoryForGOOS(goos string) (func() install.ServiceInstaller, error) {
+	switch goos {
+	case "darwin":
+		return func() install.ServiceInstaller { return install.NewLaunchdInstaller() }, nil
+	case "linux":
+		return func() install.ServiceInstaller { return install.NewSystemdInstaller() }, nil
+	default:
+		return nil, fmt.Errorf("installer is only supported on darwin or linux, got %s", goos)
+	}
+}
+
+func installFailureReasonForGOOS(goos string) string {
+	switch goos {
+	case "linux":
+		return install.InstallFailureSystemd
+	default:
+		return install.InstallFailureLaunchd
+	}
 }

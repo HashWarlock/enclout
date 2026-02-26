@@ -31,7 +31,7 @@ Describe the operator sequence for channel-initiated connector access with local
 8. If verification fails, local agent posts `verification_failed` with reason code.
 9. Channel receives final state from orchestrator.
 
-## Install Bootstrap Flow (macOS Launchd First)
+## Install Bootstrap Flow (macOS Launchd + Linux Systemd)
 
 1. User requests install from a paired channel:
    - `request_connector_install(connector_id, device_id?)`
@@ -42,7 +42,9 @@ Describe the operator sequence for channel-initiated connector access with local
 5. Installer redeems token once:
    - valid + approved -> session details returned
    - invalid/replayed/expired -> fail closed
-6. Installer writes `launchd` plist and starts local agent service.
+6. Installer writes OS service config and starts local agent service:
+   - macOS: `launchd` plist
+   - Linux: `systemd --user` unit
 7. Installer posts install result:
    - `installed` on success
    - `failed` with reason code on failure

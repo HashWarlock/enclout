@@ -120,6 +120,36 @@ func TestRunReportsFailedOnInstallerError(t *testing.T) {
 	}
 }
 
+func TestRunReportsFailedWithConfiguredReason(t *testing.T) {
+	client := &fakeInstallAPI{
+		redeemSession: api.InstallSession{
+			ID:       "ins_1",
+			DeviceID: "dev_1",
+			Status:   "approved",
+		},
+	}
+	installer := &fakeServiceInstaller{err: errors.New("systemctl failed")}
+
+	err := Run(context.Background(), client, installer, Config{
+		InstallToken:         "tok_1",
+		Label:                "ai.enclout.agent",
+		AgentBinary:          "/usr/local/bin/enclout-agent",
+		PlistPath:            "/tmp/ai.enclout.agent.service",
+		InstallFailureReason: "SystemdInstallError",
+		Env: map[string]string{
+			"CONTROL_PLANE_URL": "http://127.0.0.1:8080",
+			"LOCAL_USERNAME":    "alice",
+			"DCAP_VERIFIER_URL": "http://127.0.0.1:9000",
+		},
+	})
+	if err == nil {
+		t.Fatalf("expected run error")
+	}
+	if client.lastPostResultReason != "SystemdInstallError" {
+		t.Fatalf("expected SystemdInstallError reason, got %q", client.lastPostResultReason)
+	}
+}
+
 func TestRunReportsFailedOnInvalidConfig(t *testing.T) {
 	client := &fakeInstallAPI{
 		redeemSession: api.InstallSession{

@@ -23,6 +23,14 @@ func TestDefaultPlistPath(t *testing.T) {
 	}
 }
 
+func TestDefaultSystemdUnitPath(t *testing.T) {
+	got := defaultSystemdUnitPath("/home/alice", "ai.enclout.agent")
+	want := "/home/alice/.config/systemd/user/ai.enclout.agent.service"
+	if got != want {
+		t.Fatalf("unexpected unit path: got %q want %q", got, want)
+	}
+}
+
 func TestBuildInstallEnvIncludesRequiredAndOptional(t *testing.T) {
 	env := map[string]string{
 		"AGENT_TOKEN":                     "tok",
@@ -288,5 +296,56 @@ func TestRunEndToEndInstallFlowFromIntentToInstalled(t *testing.T) {
 	}
 	if got.ReasonCode != "" {
 		t.Fatalf("expected empty reason code on success, got %q", got.ReasonCode)
+	}
+}
+
+func TestRunEndToEndInstallFlowLinuxSystemd(t *testing.T) {
+	apiState := newFakeControlPlaneInstallAPI()
+	server := httptest.NewServer(apiState)
+	defer server.Close()
+
+	client := server.Client()
+	createResp := postJSON(t, client, server.URL+"/v1/openclaw/intents", `{
+		"intent":"request_connector_install",
+		"openclaw_user_id":"usr_1",
+		"connector_id":"conn_1",
+		"device_id":"dev_1",
+		"source_channel":"slack"
+	}`)
+	sessionID := createResp["id"].(string)
+	installToken := createResp["install_token"].(string)
+
+	_ = postJSON(t, client, server.URL+"/v1/openclaw/intents", `{
+		"intent":"approve_install_session",
+		"install_session_id":"`+sessionID+`",
+		"approved":true
+	}`)
+
+	fakeInstaller := &fakeLaunchdInstaller{}
+	err := runWithDeps(
+		context.Background(),
+		[]string{
+			"-token", installToken,
+			"-agent-bin", "/usr/local/bin/enclout-agent",
+			"-control-plane-url", server.URL,
+			"-dcap-verifier-url", "http://127.0.0.1:9000",
+			"-local-username", "alice",
+			"-service-path", filepath.Join(t.TempDir(), "ai.enclout.agent.service"),
+		},
+		func(_ string) (string, bool) { return "", false },
+		"linux",
+		func() install.ServiceInstaller { return fakeInstaller },
+		install.Run,
+	)
+	if err != nil {
+		t.Fatalf("unexpected run error: %v", err)
+	}
+
+	if fakeInstaller.calls != 1 {
+		t.Fatalf("expected install call once, got %d", fakeInstaller.calls)
+	}
+	got := apiState.session(sessionID)
+	if got.Status != "installed" {
+		t.Fatalf("expected installed session status, got %q", got.Status)
 	}
 }

@@ -145,3 +145,58 @@ Install the bundled `enclout` skill package into your agent skill directory:
 
 Default install target (if omitted) is `~/.agents/skills`.
 Skill contents live at `skills/enclout-openclaw-agent`.
+
+### Docker Compose (CVM) Quickstart
+
+Use this flow when your OpenClaw agent runs in a Docker Compose service.
+
+1. Update the repo on the CVM host:
+
+```bash
+cd ~/enclout
+git checkout main
+git pull origin main
+```
+
+2. Install the `enclout` skill on the CVM host:
+
+```bash
+cd ~/enclout
+./scripts/install-enclout-skill.sh "$HOME/.agents/skills"
+```
+
+3. Mount host skills into the agent container (adjust service/path names):
+
+```yaml
+services:
+  openclaw-agent:
+    volumes:
+      - ${HOME}/.agents/skills:/home/app/.agents/skills:ro
+```
+
+4. Recreate the agent container:
+
+```bash
+docker compose up -d --force-recreate openclaw-agent
+```
+
+5. Verify the skill exists inside the container:
+
+```bash
+docker compose exec openclaw-agent \
+  sh -lc 'find /home/app/.agents/skills/enclout-openclaw-agent -maxdepth 2 -type f | sort'
+```
+
+6. Run a chat smoke test from any paired channel:
+
+```text
+Install enclout connector <connector_id> on device <device_id> from this channel.
+```
+
+Expected flow:
+
+1. Agent calls `request_connector_install`.
+2. Agent calls `approve_install_session`.
+3. You run the returned `enclout install` command on the target device.
+4. Agent polls `GET /v1/install-sessions/{id}` until terminal state.
+5. Agent proceeds with `request_connector_access` after `installed`.

@@ -9,14 +9,20 @@ description: Use when a user wants to install or request enclout connector acces
 
 Run a channel-agnostic install and access flow for `enclout` through OpenClaw intents.
 
-## Required Inputs
+## User-Facing Inputs (Ask Only These)
 
-- `CONTROL_PLANE_URL`
-- `API_AUTH_TOKEN`
-- `openclaw_user_id`
 - `connector_id`
-- `source_channel` (any paired channel: telegram, slack, signal, etc.)
 - Optional `device_id`
+
+If `connector_id` is missing, ask one short question for it.
+If `device_id` is missing, proceed with your paired/default device logic.
+
+## Runtime-Resolved Inputs (Do Not Ask End User)
+
+- `CONTROL_PLANE_URL` from runtime config
+- `API_AUTH_TOKEN` from runtime secrets
+- `openclaw_user_id` from chat identity/session context
+- `source_channel` from current channel metadata
 
 ## Install Workflow
 
@@ -49,3 +55,5 @@ Use templates in `templates/`:
 - Never reuse a token after redemption attempt.
 - Treat `install_session_expired` and terminal `failed` as hard-stop errors.
 - Keep `source_channel` as the channel where the request originated.
+- Never ask end users for `API_AUTH_TOKEN`, `CONTROL_PLANE_URL`, or raw `openclaw_user_id`.
+- If runtime config/secrets are missing, return a short operator-facing error instead of requesting those values from the user.

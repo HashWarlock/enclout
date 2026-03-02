@@ -17,6 +17,11 @@ Skill distribution:
 - Auth: `Authorization: Bearer <API_AUTH_TOKEN>`
 - Content type: `application/json`
 
+Agent UX rule:
+
+- End users should only provide user-facing values (`connector_id`, optional `device_id`).
+- Runtime values (`API_AUTH_TOKEN`, `CONTROL_PLANE_URL`, `openclaw_user_id`, `source_channel`) must come from agent/runtime context.
+
 ## Intents
 
 ### 1) `request_connector_install`

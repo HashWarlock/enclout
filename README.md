@@ -152,6 +152,11 @@ Agent-triggered variant:
 Install skill HashWarlock/enclout@enclout-openclaw-agent and use it for the connector install flow.
 ```
 
+User experience note:
+
+- The skill should only ask the user for `connector_id` and optional `device_id`.
+- `API_AUTH_TOKEN`, `CONTROL_PLANE_URL`, and OpenClaw identity/channel context must be runtime-resolved.
+
 Local fallback (when running from checked-out repo):
 
 ```bash

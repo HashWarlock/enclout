@@ -5,6 +5,11 @@
 Define the chat-agent contract for invoking `enclout` flows through OpenClaw intents.
 This contract is channel-agnostic: any paired channel can use it by setting `source_channel`.
 
+Bundled skill package in this repo:
+
+- `skills/enclout-openclaw-agent`
+- install helper: `scripts/install-enclout-skill.sh`
+
 ## Transport
 
 - Endpoint: `POST /v1/openclaw/intents`

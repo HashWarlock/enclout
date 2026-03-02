@@ -1,0 +1,5 @@
+{
+  "intent": "approve_install_session",
+  "install_session_id": "<install_session_id>",
+  "approved": true
+}

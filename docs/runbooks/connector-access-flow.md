@@ -70,6 +70,7 @@ Status polling endpoint:
 Canonical OpenClaw contract reference:
 
 - `docs/runbooks/openclaw-skill-contract.md`
+- Skill package: `skills/enclout-openclaw-agent`
 
 ## Operational Checks
 

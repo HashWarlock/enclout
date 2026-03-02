@@ -19,6 +19,7 @@ This repository contains M1 scaffolding for a secure connector system that combi
 - `docs/runbooks`: operator flow and failure-code references.
   - `docs/runbooks/openclaw-skill-contract.md` defines the channel-agnostic agent intent contract.
   - `docs/runbooks/signing-key-rotation.md` covers safe `kid` rotation.
+- `skills/enclout-openclaw-agent`: reusable skill package for OpenClaw/Codex chat agents.
 
 ## Verification
 
@@ -133,3 +134,14 @@ go run ./services/local-agent/cmd/install -- \
 ```
 
 3. Installer redeems token, configures OS service (`launchd` or `systemd --user`), starts the agent, and posts install result (`installed` or `failed`) back to control plane.
+
+## OpenClaw Agent Skill
+
+Install the bundled `enclout` skill package into your agent skill directory:
+
+```bash
+./scripts/install-enclout-skill.sh "$HOME/.agents/skills"
+```
+
+Default install target (if omitted) is `~/.agents/skills`.
+Skill contents live at `skills/enclout-openclaw-agent`.

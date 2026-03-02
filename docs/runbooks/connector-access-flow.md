@@ -71,6 +71,7 @@ Canonical OpenClaw contract reference:
 
 - `docs/runbooks/openclaw-skill-contract.md`
 - Skill package: `skills/enclout-openclaw-agent`
+- Skill can be installed dynamically by the agent at runtime; no pre-baked image requirement.
 
 ## Operational Checks
 

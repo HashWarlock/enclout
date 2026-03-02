@@ -135,16 +135,28 @@ go run ./services/local-agent/cmd/install -- \
 
 3. Installer redeems token, configures OS service (`launchd` or `systemd --user`), starts the agent, and posts install result (`installed` or `failed`) back to control plane.
 
-## OpenClaw Agent Skill
+## OpenClaw Agent Skill (Dynamic, Optional)
 
-Install the bundled `enclout` skill package into your agent skill directory:
+You do not need to pre-bake the `enclout` skill into your OpenClaw image.
+Recommended path is dynamic install when needed.
+
+Recommended (dynamic install from GitHub):
+
+```bash
+npx skills add HashWarlock/enclout@enclout-openclaw-agent -g -y
+```
+
+Agent-triggered variant:
+
+```text
+Install skill HashWarlock/enclout@enclout-openclaw-agent and use it for the connector install flow.
+```
+
+Local fallback (when running from checked-out repo):
 
 ```bash
 ./scripts/install-enclout-skill.sh "$HOME/.agents/skills"
 ```
-
-Default install target (if omitted) is `~/.agents/skills`.
-Skill contents live at `skills/enclout-openclaw-agent`.
 
 ### Docker Compose (CVM) Quickstart
 
@@ -158,33 +170,32 @@ git checkout main
 git pull origin main
 ```
 
-2. Install the `enclout` skill on the CVM host:
+2. Install skill dynamically in the running agent container:
 
 ```bash
-cd ~/enclout
-./scripts/install-enclout-skill.sh "$HOME/.agents/skills"
+docker compose exec openclaw-agent \
+  sh -lc 'npx skills add HashWarlock/enclout@enclout-openclaw-agent -g -y'
 ```
 
-3. Mount host skills into the agent container (adjust service/path names):
+3. Optional but recommended: persist installed skills with a volume mount:
 
 ```yaml
 services:
   openclaw-agent:
     volumes:
-      - ${HOME}/.agents/skills:/home/app/.agents/skills:ro
+      - /path/on/host/agent-skills:/home/app/.agents/skills
 ```
 
-4. Recreate the agent container:
+4. Restart/recreate the agent service:
 
 ```bash
 docker compose up -d --force-recreate openclaw-agent
 ```
 
-5. Verify the skill exists inside the container:
+5. Ask the agent to confirm skill load:
 
-```bash
-docker compose exec openclaw-agent \
-  sh -lc 'find /home/app/.agents/skills/enclout-openclaw-agent -maxdepth 2 -type f | sort'
+```text
+List installed skills and confirm enclout-openclaw-agent is available.
 ```
 
 6. Run a chat smoke test from any paired channel:

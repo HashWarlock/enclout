@@ -48,7 +48,24 @@ Describe the operator sequence for channel-initiated connector access with local
 7. Installer posts install result:
    - `installed` on success
    - `failed` with reason code on failure
-8. Channel receives install outcome and can proceed with normal `request_connector_access`.
+8. Channel polls install status and shows progress to user.
+9. Channel receives install outcome and can proceed with normal `request_connector_access`.
+
+### Chat Contract (Install)
+
+`request_connector_install` response includes:
+
+- `install_session_id`
+- `status`
+- `expires_at`
+- `install_token`
+- `install_commands.darwin`
+- `install_commands.linux`
+
+Status polling endpoint:
+
+- `GET /v1/install-sessions/{install_session_id}`
+- returns current session state (`requested`, `approved`, `installed`, `failed`) plus optional `reason_code`.
 
 ## Operational Checks
 

@@ -1,6 +1,7 @@
 package openclaw
 
 import (
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -98,8 +99,28 @@ func TestIntentMapsToCreateInstallSession(t *testing.T) {
 	if rr.Code != http.StatusCreated {
 		t.Fatalf("expected status 201, got %d body=%s", rr.Code, rr.Body.String())
 	}
-	if !strings.Contains(rr.Body.String(), `"install_token":"tok_1"`) {
-		t.Fatalf("expected install token in body, got %s", rr.Body.String())
+	var out map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("unexpected json response: %v", err)
+	}
+	if out["install_token"] != "tok_1" {
+		t.Fatalf("expected install token in body, got %v", out["install_token"])
+	}
+	if out["install_session_id"] != "ins_1" {
+		t.Fatalf("expected install_session_id in body, got %v", out["install_session_id"])
+	}
+	if out["expires_at"] == "" {
+		t.Fatalf("expected expires_at in body")
+	}
+	commands, ok := out["install_commands"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected install_commands object in body")
+	}
+	if !strings.Contains(commands["darwin"].(string), "enclout install") {
+		t.Fatalf("expected darwin command template, got %v", commands["darwin"])
+	}
+	if !strings.Contains(commands["linux"].(string), "enclout install") {
+		t.Fatalf("expected linux command template, got %v", commands["linux"])
 	}
 	if store.lastCreateInstallInput.SourceChannel != "telegram" {
 		t.Fatalf("expected source channel metadata to be stored")

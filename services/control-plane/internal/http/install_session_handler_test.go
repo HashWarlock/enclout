@@ -123,3 +123,44 @@ func TestInstallSessionResultHandlerInstalledTransition(t *testing.T) {
 		t.Fatalf("expected installed status in body, got %s", rr.Body.String())
 	}
 }
+
+func TestGetInstallSessionStatus(t *testing.T) {
+	handler, store := newTestHandler(t)
+
+	created, _, err := store.CreateInstallSession(requests.CreateInstallInput{
+		OpenClawUserID: "usr_1",
+		DeviceID:       "dev_1",
+		ConnectorID:    "conn_1",
+		SourceChannel:  "telegram",
+		TTL:            10 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("unexpected create error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/install-sessions/"+created.ID, nil)
+	rr := httptest.NewRecorder()
+	handler.GetInstallSession(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"id":"`+created.ID+`"`) {
+		t.Fatalf("expected session id in body, got %s", rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"status":"requested"`) {
+		t.Fatalf("expected requested status in body, got %s", rr.Body.String())
+	}
+}
+
+func TestGetInstallSessionStatusNotFound(t *testing.T) {
+	handler, _ := newTestHandler(t)
+
+	req := httptest.NewRequest(http.MethodGet, "/v1/install-sessions/missing", nil)
+	rr := httptest.NewRecorder()
+	handler.GetInstallSession(rr, req)
+
+	if rr.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d body=%s", rr.Code, rr.Body.String())
+	}
+}

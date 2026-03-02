@@ -54,6 +54,8 @@ func main() {
 	mux.HandleFunc("/v1/install-sessions/redeem", requireAuth(methodOnly(http.MethodPost, api.RedeemInstallToken)))
 	mux.HandleFunc("/v1/install-sessions/", func(w http.ResponseWriter, r *http.Request) {
 		switch {
+		case r.Method == http.MethodGet && !strings.Contains(strings.TrimPrefix(r.URL.Path, "/v1/install-sessions/"), "/"):
+			requireAuth(api.GetInstallSession)(w, r)
 		case strings.HasSuffix(r.URL.Path, "/approval") && r.Method == http.MethodPost:
 			requireAuth(api.InstallSessionApproval)(w, r)
 		case strings.HasSuffix(r.URL.Path, "/result") && r.Method == http.MethodPost:

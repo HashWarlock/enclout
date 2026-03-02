@@ -114,6 +114,29 @@ type InstallSessionResultBody struct {
 	ReasonCode string `json:"reason_code"`
 }
 
+func (h *Handler) GetInstallSession(w http.ResponseWriter, r *http.Request) {
+	id, err := parseIDFromPath(r.URL.Path, "/v1/install-sessions/", "")
+	if err != nil {
+		http.Error(w, "invalid_path", http.StatusBadRequest)
+		return
+	}
+
+	session, err := h.store.GetInstallSession(id)
+	if err != nil {
+		switch {
+		case errors.Is(err, requests.ErrNotFound):
+			http.Error(w, "not_found", http.StatusNotFound)
+		case errors.Is(err, requests.ErrExpired):
+			http.Error(w, "install_session_expired", http.StatusGone)
+		default:
+			http.Error(w, "get_failed", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, session)
+}
+
 func (h *Handler) InstallSessionResult(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDFromPath(r.URL.Path, "/v1/install-sessions/", "/result")
 	if err != nil {

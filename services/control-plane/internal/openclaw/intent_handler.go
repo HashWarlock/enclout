@@ -2,6 +2,7 @@ package openclaw
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -44,6 +45,19 @@ type IntentBody struct {
 	ReasonCode       string `json:"reason_code"`
 }
 
+type InstallCommandTemplates struct {
+	Darwin string `json:"darwin"`
+	Linux  string `json:"linux"`
+}
+
+type InstallRequestResponse struct {
+	InstallSessionID string                  `json:"install_session_id"`
+	InstallToken     string                  `json:"install_token"`
+	Status           requests.InstallStatus  `json:"status"`
+	ExpiresAt        time.Time               `json:"expires_at"`
+	InstallCommands  InstallCommandTemplates `json:"install_commands"`
+}
+
 func (h *IntentHandler) Handle(w http.ResponseWriter, r *http.Request) {
 	var payload IntentBody
 	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
@@ -81,12 +95,12 @@ func (h *IntentHandler) Handle(w http.ResponseWriter, r *http.Request) {
 
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusCreated)
-		_ = json.NewEncoder(w).Encode(struct {
-			requests.InstallSession
-			InstallToken string `json:"install_token"`
-		}{
-			InstallSession: session,
-			InstallToken:   token,
+		_ = json.NewEncoder(w).Encode(InstallRequestResponse{
+			InstallSessionID: session.ID,
+			InstallToken:     token,
+			Status:           session.Status,
+			ExpiresAt:        session.ExpiresAt,
+			InstallCommands:  installCommandTemplates(token),
 		})
 	case InstallApprovalIntent:
 		updated, err := h.store.SetInstallApproval(payload.InstallSessionID, payload.Approved)
@@ -108,5 +122,16 @@ func (h *IntentHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(updated)
 	default:
 		http.Error(w, "unsupported_intent", http.StatusBadRequest)
+	}
+}
+
+func installCommandTemplates(token string) InstallCommandTemplates {
+	command := fmt.Sprintf(
+		`CONTROL_PLANE_URL="<control_plane_url>" DCAP_VERIFIER_URL="<dcap_verifier_url>" enclout install -token %q -agent-bin "/usr/local/bin/enclout-agent"`,
+		token,
+	)
+	return InstallCommandTemplates{
+		Darwin: command,
+		Linux:  command,
 	}
 }

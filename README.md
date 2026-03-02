@@ -17,6 +17,7 @@ This repository contains M1 scaffolding for a secure connector system that combi
 - `tests/integration`: strict-flow fixture tests.
 - `docs/plans`: validated design and implementation plan.
 - `docs/runbooks`: operator flow and failure-code references.
+  - `docs/runbooks/openclaw-skill-contract.md` defines the channel-agnostic agent intent contract.
   - `docs/runbooks/signing-key-rotation.md` covers safe `kid` rotation.
 
 ## Verification

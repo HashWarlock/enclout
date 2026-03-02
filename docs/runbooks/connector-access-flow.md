@@ -67,6 +67,10 @@ Status polling endpoint:
 - `GET /v1/install-sessions/{install_session_id}`
 - returns current session state (`requested`, `approved`, `installed`, `failed`) plus optional `reason_code`.
 
+Canonical OpenClaw contract reference:
+
+- `docs/runbooks/openclaw-skill-contract.md`
+
 ## Operational Checks
 
 - Check `/healthz` on control plane.

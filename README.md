@@ -158,6 +158,23 @@ User experience note:
 - The skill should not ask for `connector_id`/`device_id` up front.
 - `API_AUTH_TOKEN`, `CONTROL_PLANE_URL`, and OpenClaw identity/channel context must be runtime-resolved.
 
+### Agent Prompt Contract (Important)
+
+When using `enclout-openclaw-agent`, the chat agent must follow this behavior:
+
+1. Never ask the end user for runtime/operator values:
+   `API_AUTH_TOKEN`, `CONTROL_PLANE_URL`, `openclaw_user_id`, `source_channel`,
+   `connector_id` (before install), or `device_id` (before install).
+2. Start with URL-first flow:
+   `request_connector_connect` -> `install_url` -> approval -> polling.
+3. If runtime config is missing, return an operator-facing error instead of a user prompt.
+
+Expected operator-facing error style:
+
+```text
+Operator action needed: missing runtime config/secrets in agent container (API_AUTH_TOKEN and/or CONTROL_PLANE_URL). End user does not need to provide these.
+```
+
 Local fallback (when running from checked-out repo):
 
 ```bash
@@ -208,6 +225,12 @@ List installed skills and confirm enclout-openclaw-agent is available.
 
 ```text
 Connect me to this device.
+```
+
+Optional stronger bootstrap prompt (recommended once per new agent session):
+
+```text
+Use enclout-openclaw-agent. Do URL-first connect flow. Do NOT ask end users for env vars, API tokens, control-plane URL, OpenClaw IDs, connector_id, or device_id before install. If runtime config is missing, return an operator-action error only.
 ```
 
 Expected flow:

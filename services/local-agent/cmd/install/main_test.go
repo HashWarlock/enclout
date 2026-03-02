@@ -105,6 +105,8 @@ func (f *fakeControlPlaneInstallAPI) ServeHTTP(w http.ResponseWriter, r *http.Re
 		f.handleIntent(w, r)
 	case r.Method == http.MethodPost && r.URL.Path == "/v1/install-sessions/redeem":
 		f.handleRedeem(w, r)
+	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/install-sessions/") && !strings.Contains(strings.TrimPrefix(r.URL.Path, "/v1/install-sessions/"), "/"):
+		f.handleGetSession(w, r)
 	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1/install-sessions/") && strings.HasSuffix(r.URL.Path, "/result"):
 		f.handleResult(w, r)
 	default:
@@ -206,6 +208,19 @@ func (f *fakeControlPlaneInstallAPI) handleResult(w http.ResponseWriter, r *http
 	writeJSON(w, http.StatusOK, session)
 }
 
+func (f *fakeControlPlaneInstallAPI) handleGetSession(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimPrefix(r.URL.Path, "/v1/install-sessions/")
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	session, ok := f.sessions[id]
+	if !ok {
+		http.Error(w, "not_found", http.StatusNotFound)
+		return
+	}
+	writeJSON(w, http.StatusOK, session)
+}
+
 func (f *fakeControlPlaneInstallAPI) session(id string) installSessionState {
 	f.mu.Lock()
 	defer f.mu.Unlock()
@@ -236,6 +251,27 @@ func postJSON(t *testing.T, client *http.Client, url string, body string) map[st
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		t.Fatalf("unexpected status %d from %s", resp.StatusCode, url)
+	}
+	var out map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	return out
+}
+
+func getJSON(t *testing.T, client *http.Client, url string) map[string]any {
+	t.Helper()
+	req, err := http.NewRequest(http.MethodGet, url, nil)
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	resp, err := client.Do(req)
+	if err != nil {
+		t.Fatalf("get %s: %v", url, err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
 		t.Fatalf("unexpected status %d from %s", resp.StatusCode, url)
 	}
 	var out map[string]any
@@ -296,6 +332,64 @@ func TestRunEndToEndInstallFlowFromIntentToInstalled(t *testing.T) {
 	}
 	if got.ReasonCode != "" {
 		t.Fatalf("expected empty reason code on success, got %q", got.ReasonCode)
+	}
+}
+
+func TestRunEndToEndInstallFlowStatusProgressionViaPolling(t *testing.T) {
+	apiState := newFakeControlPlaneInstallAPI()
+	server := httptest.NewServer(apiState)
+	defer server.Close()
+
+	client := server.Client()
+	createResp := postJSON(t, client, server.URL+"/v1/openclaw/intents", `{
+		"intent":"request_connector_install",
+		"openclaw_user_id":"usr_1",
+		"connector_id":"conn_1",
+		"device_id":"dev_1",
+		"source_channel":"whatsapp"
+	}`)
+	sessionID := createResp["id"].(string)
+	installToken := createResp["install_token"].(string)
+
+	requested := getJSON(t, client, server.URL+"/v1/install-sessions/"+sessionID)
+	if requested["status"] != "requested" {
+		t.Fatalf("expected requested status after create, got %#v", requested["status"])
+	}
+
+	_ = postJSON(t, client, server.URL+"/v1/openclaw/intents", `{
+		"intent":"approve_install_session",
+		"install_session_id":"`+sessionID+`",
+		"approved":true
+	}`)
+
+	approved := getJSON(t, client, server.URL+"/v1/install-sessions/"+sessionID)
+	if approved["status"] != "approved" {
+		t.Fatalf("expected approved status after approval, got %#v", approved["status"])
+	}
+
+	fakeInstaller := &fakeLaunchdInstaller{}
+	err := runWithDeps(
+		context.Background(),
+		[]string{
+			"-token", installToken,
+			"-agent-bin", "/usr/local/bin/enclout-agent",
+			"-control-plane-url", server.URL,
+			"-dcap-verifier-url", "http://127.0.0.1:9000",
+			"-local-username", "alice",
+			"-plist-path", filepath.Join(t.TempDir(), "ai.enclout.agent.plist"),
+		},
+		func(_ string) (string, bool) { return "", false },
+		"darwin",
+		func() install.ServiceInstaller { return fakeInstaller },
+		install.Run,
+	)
+	if err != nil {
+		t.Fatalf("unexpected run error: %v", err)
+	}
+
+	installed := getJSON(t, client, server.URL+"/v1/install-sessions/"+sessionID)
+	if installed["status"] != "installed" {
+		t.Fatalf("expected installed status after install, got %#v", installed["status"])
 	}
 }
 

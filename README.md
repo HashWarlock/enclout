@@ -141,22 +141,43 @@ go run ./services/local-agent/cmd/install -- \
 You do not need to pre-bake the `enclout` skill into your OpenClaw image.
 Recommended path is dynamic install when needed.
 
-Recommended (dynamic install from GitHub):
+Recommended (Agentskills-compatible, explicit skill selector):
 
 ```bash
-npx skills add HashWarlock/enclout@enclout-openclaw-agent -g -y
+npx skills add HashWarlock/enclout --skill enclout-openclaw-agent -a openclaw -g -y
 ```
 
-Agent-triggered variant:
+Most reliable fallback (direct GitHub skill URL):
+
+```bash
+npx skills add https://github.com/HashWarlock/enclout/tree/main/skills/enclout-openclaw-agent -a openclaw -g -y
+```
+
+Do not use this older syntax (can fail to resolve skill correctly):
 
 ```text
-Install skill HashWarlock/enclout@enclout-openclaw-agent and use it for the connector install flow.
+HashWarlock/enclout@enclout-openclaw-agent
+```
+
+### Chat-Channel Bootstrap (Copy/Paste)
+
+Use this as the first operator message in the paired chat channel:
+
+```text
+Install skill from https://github.com/HashWarlock/enclout/tree/main/skills/enclout-openclaw-agent for the openclaw agent.
+Then confirm enclout-openclaw-agent is loaded.
+After that, for connect requests, run URL-first flow:
+request_connector_connect -> send install_url -> approve_install_session -> poll install session -> request_connector_access.
+Never ask end users for API_AUTH_TOKEN, CONTROL_PLANE_URL, openclaw_user_id, source_channel, connector_id (before install), or device_id (before install).
+If runtime config is missing, return exactly:
+"Operator action needed: missing runtime config/secrets in agent container (API_AUTH_TOKEN and/or CONTROL_PLANE_URL). End user does not need to provide these."
 ```
 
 User experience note:
 
 - The skill should not ask for `connector_id`/`device_id` up front.
 - `API_AUTH_TOKEN`, `CONTROL_PLANE_URL`, and OpenClaw identity/channel context must be runtime-resolved.
+- If those runtime values are missing, return operator error; do not ask the end user for env vars.
 
 ### Agent Prompt Contract (Important)
 
@@ -197,7 +218,7 @@ git pull origin main
 
 ```bash
 docker compose exec openclaw-agent \
-  sh -lc 'npx skills add HashWarlock/enclout@enclout-openclaw-agent -g -y'
+  sh -lc 'npx skills add https://github.com/HashWarlock/enclout/tree/main/skills/enclout-openclaw-agent -a openclaw -g -y'
 ```
 
 3. Optional but recommended: persist installed skills with a volume mount:
@@ -227,10 +248,12 @@ List installed skills and confirm enclout-openclaw-agent is available.
 Connect me to this device.
 ```
 
-Optional stronger bootstrap prompt (recommended once per new agent session):
+If the agent still asks the user for env vars or IDs, send this correction prompt once:
 
 ```text
-Use enclout-openclaw-agent. Do URL-first connect flow. Do NOT ask end users for env vars, API tokens, control-plane URL, OpenClaw IDs, connector_id, or device_id before install. If runtime config is missing, return an operator-action error only.
+Stop requesting runtime/operator values from end users.
+Use enclout-openclaw-agent URL-first flow only.
+If runtime config/secrets are missing, return operator-action error only.
 ```
 
 Expected flow:

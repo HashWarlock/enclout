@@ -23,6 +23,12 @@ Do not ask for `connector_id` or `device_id` before install completes.
 - `openclaw_user_id` from chat identity/session context
 - `source_channel` from current channel metadata
 
+If any runtime-resolved input is missing, stop and return:
+
+```text
+Operator action needed: missing runtime config/secrets in agent container (API_AUTH_TOKEN and/or CONTROL_PLANE_URL). End user does not need to provide these.
+```
+
 ## Connect + Install Workflow
 
 1. Create connect/install session via `request_connector_connect`.
@@ -55,6 +61,6 @@ Use templates in `templates/`:
 - Never reuse a token after redemption attempt.
 - Treat `install_session_expired` and terminal `failed` as hard-stop errors.
 - Keep `source_channel` as the channel where the request originated.
-- Never ask end users for `API_AUTH_TOKEN`, `CONTROL_PLANE_URL`, or raw `openclaw_user_id`.
+- Never ask end users for `API_AUTH_TOKEN`, `CONTROL_PLANE_URL`, `openclaw_user_id`, `connector_id` (before install), or `device_id` (before install).
 - If runtime config/secrets are missing, return a short operator-facing error instead of requesting those values from the user.
 - If install reaches `installed` but `connector_id`/`device_id` is missing, stop and report operator error (do not ask end user for IDs).

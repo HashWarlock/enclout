@@ -7,7 +7,8 @@ This contract is channel-agnostic: any paired channel can use it by setting `sou
 
 Skill distribution:
 
-- Recommended dynamic install: `npx skills add HashWarlock/enclout@enclout-openclaw-agent -g -y`
+- Recommended dynamic install: `npx skills add HashWarlock/enclout --skill enclout-openclaw-agent -g -y`
+- Reliable fallback: `npx skills add https://github.com/HashWarlock/enclout/tree/main/skills/enclout-openclaw-agent -g -y`
 - Repository skill source: `skills/enclout-openclaw-agent`
 - Local fallback installer: `scripts/install-enclout-skill.sh`
 

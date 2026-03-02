@@ -11,6 +11,11 @@ import (
 type fakeInstallAPI struct {
 	redeemSession        api.InstallSession
 	redeemErr            error
+	registerCalls        int
+	lastRegisterID       string
+	lastRegisterDeviceID string
+	lastRegisterConnID   string
+	registerErr          error
 	postResultCalls      int
 	lastPostResultID     string
 	lastPostResultStatus string
@@ -31,6 +36,14 @@ func (f *fakeInstallAPI) PostInstallResult(_ context.Context, sessionID string, 
 	f.lastPostResultStatus = status
 	f.lastPostResultReason = reasonCode
 	return f.postResultErr
+}
+
+func (f *fakeInstallAPI) RegisterInstallIdentity(_ context.Context, sessionID string, connectorID string, deviceID string) error {
+	f.registerCalls++
+	f.lastRegisterID = sessionID
+	f.lastRegisterConnID = connectorID
+	f.lastRegisterDeviceID = deviceID
+	return f.registerErr
 }
 
 type fakeServiceInstaller struct {
@@ -77,11 +90,52 @@ func TestRunInstallsServiceAndReportsInstalled(t *testing.T) {
 	if installer.lastCfg.Env["DEVICE_ID"] != "dev_1" {
 		t.Fatalf("expected DEVICE_ID from redeemed session, got %q", installer.lastCfg.Env["DEVICE_ID"])
 	}
+	if client.registerCalls != 1 {
+		t.Fatalf("expected one install identity registration call, got %d", client.registerCalls)
+	}
+	if client.lastRegisterConnID != "conn_1" || client.lastRegisterDeviceID != "dev_1" {
+		t.Fatalf("expected registered identity conn_1/dev_1, got %q/%q", client.lastRegisterConnID, client.lastRegisterDeviceID)
+	}
 	if client.postResultCalls != 1 {
 		t.Fatalf("expected one install result post, got %d", client.postResultCalls)
 	}
 	if client.lastPostResultStatus != "installed" {
 		t.Fatalf("expected installed result status, got %q", client.lastPostResultStatus)
+	}
+}
+
+func TestRunGeneratesAndRegistersIdentityWhenSessionMissingIDs(t *testing.T) {
+	client := &fakeInstallAPI{
+		redeemSession: api.InstallSession{
+			ID:             "ins_1",
+			OpenClawUserID: "usr_1",
+			Status:         "approved",
+		},
+	}
+	installer := &fakeServiceInstaller{}
+
+	err := Run(context.Background(), client, installer, Config{
+		InstallToken: "tok_1",
+		Label:        "ai.enclout.agent",
+		AgentBinary:  "/usr/local/bin/enclout-agent",
+		PlistPath:    "/tmp/ai.enclout.agent.plist",
+		Env: map[string]string{
+			"CONTROL_PLANE_URL": "http://127.0.0.1:8080",
+			"LOCAL_USERNAME":    "alice",
+			"DCAP_VERIFIER_URL": "http://127.0.0.1:9000",
+		},
+	})
+	if err != nil {
+		t.Fatalf("unexpected run error: %v", err)
+	}
+	if client.registerCalls != 1 {
+		t.Fatalf("expected one registration call, got %d", client.registerCalls)
+	}
+	if client.lastRegisterConnID == "" || client.lastRegisterDeviceID == "" {
+		t.Fatalf("expected non-empty generated identity, got %q/%q", client.lastRegisterConnID, client.lastRegisterDeviceID)
+	}
+	if installer.lastCfg.Env["CONNECTOR_ID"] == "" || installer.lastCfg.Env["DEVICE_ID"] == "" {
+		t.Fatalf("expected generated identities in service env")
 	}
 }
 

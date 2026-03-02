@@ -106,6 +106,89 @@ func TestInstallSessionStatusProgressionViaIntentAndPolling(t *testing.T) {
 	}
 }
 
+func TestInstallSessionURLFirstFlowBindsIdentityBeforeInstalled(t *testing.T) {
+	api, store := newTestHandler(t)
+	intentHandler := openclaw.NewIntentHandler(store)
+
+	mux := http.NewServeMux()
+	mux.HandleFunc("/v1/openclaw/intents", intentHandler.Handle)
+	mux.HandleFunc("/v1/install-sessions/", func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == http.MethodGet && !strings.Contains(strings.TrimPrefix(r.URL.Path, "/v1/install-sessions/"), "/"):
+			api.GetInstallSession(w, r)
+		case strings.HasSuffix(r.URL.Path, "/registration") && r.Method == http.MethodPost:
+			api.InstallSessionRegistration(w, r)
+		case strings.HasSuffix(r.URL.Path, "/result") && r.Method == http.MethodPost:
+			api.InstallSessionResult(w, r)
+		default:
+			http.NotFound(w, r)
+		}
+	})
+
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client := server.Client()
+
+	create := doJSON(t, client, http.MethodPost, server.URL+"/v1/openclaw/intents", map[string]any{
+		"intent":           "request_connector_connect",
+		"openclaw_user_id": "usr_1",
+		"source_channel":   "telegram",
+	})
+	if create.status != http.StatusCreated {
+		t.Fatalf("expected create status 201, got %d body=%s", create.status, string(create.body))
+	}
+	var createOut map[string]any
+	if err := json.Unmarshal(create.body, &createOut); err != nil {
+		t.Fatalf("decode create body: %v", err)
+	}
+	sessionID, _ := createOut["install_session_id"].(string)
+	if sessionID == "" {
+		t.Fatalf("expected install_session_id in create response")
+	}
+	if createOut["install_url"] == "" {
+		t.Fatalf("expected install_url in create response")
+	}
+
+	approve := doJSON(t, client, http.MethodPost, server.URL+"/v1/openclaw/intents", map[string]any{
+		"intent":             "approve_install_session",
+		"install_session_id": sessionID,
+		"approved":           true,
+	})
+	if approve.status != http.StatusOK {
+		t.Fatalf("expected approve status 200, got %d body=%s", approve.status, string(approve.body))
+	}
+
+	reg := doJSON(t, client, http.MethodPost, server.URL+"/v1/install-sessions/"+sessionID+"/registration", map[string]any{
+		"connector_id": "conn_auto_1",
+		"device_id":    "dev_auto_1",
+	})
+	if reg.status != http.StatusOK {
+		t.Fatalf("expected registration status 200, got %d body=%s", reg.status, string(reg.body))
+	}
+
+	result := doJSON(t, client, http.MethodPost, server.URL+"/v1/install-sessions/"+sessionID+"/result", map[string]any{
+		"status": "installed",
+	})
+	if result.status != http.StatusOK {
+		t.Fatalf("expected result status 200, got %d body=%s", result.status, string(result.body))
+	}
+
+	installed := doJSON(t, client, http.MethodGet, server.URL+"/v1/install-sessions/"+sessionID, nil)
+	if installed.status != http.StatusOK {
+		t.Fatalf("expected installed poll status 200, got %d body=%s", installed.status, string(installed.body))
+	}
+	var installedOut map[string]any
+	if err := json.Unmarshal(installed.body, &installedOut); err != nil {
+		t.Fatalf("decode installed body: %v", err)
+	}
+	if installedOut["connector_id"] != "conn_auto_1" {
+		t.Fatalf("expected bound connector_id, got %#v", installedOut["connector_id"])
+	}
+	if installedOut["device_id"] != "dev_auto_1" {
+		t.Fatalf("expected bound device_id, got %#v", installedOut["device_id"])
+	}
+}
+
 type jsonResponse struct {
 	status int
 	body   []byte

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"time"
 
 	"enclout/services/control-plane/internal/requests"
@@ -11,6 +12,7 @@ import (
 
 const RequestIntent = "request_connector_access"
 const InstallRequestIntent = "request_connector_install"
+const ConnectRequestIntent = "request_connector_connect"
 const InstallApprovalIntent = "approve_install_session"
 const InstallResultIntent = "install_session_result"
 
@@ -53,6 +55,7 @@ type InstallCommandTemplates struct {
 type InstallRequestResponse struct {
 	InstallSessionID string                  `json:"install_session_id"`
 	InstallToken     string                  `json:"install_token"`
+	InstallURL       string                  `json:"install_url"`
 	Status           requests.InstallStatus  `json:"status"`
 	ExpiresAt        time.Time               `json:"expires_at"`
 	InstallCommands  InstallCommandTemplates `json:"install_commands"`
@@ -98,6 +101,27 @@ func (h *IntentHandler) Handle(w http.ResponseWriter, r *http.Request) {
 		_ = json.NewEncoder(w).Encode(InstallRequestResponse{
 			InstallSessionID: session.ID,
 			InstallToken:     token,
+			InstallURL:       installURLForRequest(r, token),
+			Status:           session.Status,
+			ExpiresAt:        session.ExpiresAt,
+			InstallCommands:  installCommandTemplates(token),
+		})
+	case ConnectRequestIntent:
+		session, token, err := h.store.CreateInstallSession(requests.CreateInstallInput{
+			OpenClawUserID: payload.OpenClawUserID,
+			SourceChannel:  payload.SourceChannel,
+			TTL:            h.requestTTL,
+		})
+		if err != nil {
+			http.Error(w, "create_failed", http.StatusBadRequest)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(InstallRequestResponse{
+			InstallSessionID: session.ID,
+			InstallToken:     token,
+			InstallURL:       installURLForRequest(r, token),
 			Status:           session.Status,
 			ExpiresAt:        session.ExpiresAt,
 			InstallCommands:  installCommandTemplates(token),
@@ -134,4 +158,23 @@ func installCommandTemplates(token string) InstallCommandTemplates {
 		Darwin: command,
 		Linux:  command,
 	}
+}
+
+func installURLForRequest(r *http.Request, token string) string {
+	host := r.Host
+	if forwardedHost := r.Header.Get("X-Forwarded-Host"); forwardedHost != "" {
+		host = forwardedHost
+	}
+	if host == "" {
+		return "/install?token=" + url.QueryEscape(token)
+	}
+
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if forwardedProto := r.Header.Get("X-Forwarded-Proto"); forwardedProto != "" {
+		scheme = forwardedProto
+	}
+	return fmt.Sprintf("%s://%s/install?token=%s", scheme, host, url.QueryEscape(token))
 }

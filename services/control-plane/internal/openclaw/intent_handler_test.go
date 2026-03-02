@@ -127,6 +127,34 @@ func TestIntentMapsToCreateInstallSession(t *testing.T) {
 	}
 }
 
+func TestIntentRequestConnectorConnectReturnsInstallURL(t *testing.T) {
+	store := &fakeStore{}
+	handler := NewIntentHandler(store)
+
+	body := `{"intent":"request_connector_connect","openclaw_user_id":"usr_1","source_channel":"telegram"}`
+	req := httptest.NewRequest(http.MethodPost, "/v1/openclaw/intents", strings.NewReader(body))
+	rr := httptest.NewRecorder()
+
+	handler.Handle(rr, req)
+
+	if rr.Code != http.StatusCreated {
+		t.Fatalf("expected status 201, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	var out map[string]any
+	if err := json.Unmarshal(rr.Body.Bytes(), &out); err != nil {
+		t.Fatalf("unexpected json response: %v", err)
+	}
+	if out["install_session_id"] == "" {
+		t.Fatalf("expected install_session_id in body")
+	}
+	if out["install_url"] == "" {
+		t.Fatalf("expected install_url in body")
+	}
+	if !strings.Contains(out["install_url"].(string), "token=") {
+		t.Fatalf("expected install_url to carry token, got %v", out["install_url"])
+	}
+}
+
 func TestIntentMapsToInstallApproval(t *testing.T) {
 	store := &fakeStore{}
 	handler := NewIntentHandler(store)

@@ -171,7 +171,7 @@ func (s *InMemoryStore) expireIfNeeded(req ConnectionRequest) ConnectionRequest 
 }
 
 func (s *InMemoryStore) CreateInstallSession(in CreateInstallInput) (InstallSession, string, error) {
-	if in.OpenClawUserID == "" || in.DeviceID == "" || in.ConnectorID == "" {
+	if in.OpenClawUserID == "" {
 		return InstallSession{}, "", fmt.Errorf("missing required fields")
 	}
 	if in.TTL <= 0 {
@@ -216,6 +216,34 @@ func (s *InMemoryStore) GetInstallSession(id string) (InstallSession, error) {
 	}
 	s.installSessions[id] = session
 
+	return session, nil
+}
+
+func (s *InMemoryStore) SetInstallIdentity(id string, connectorID string, deviceID string) (InstallSession, error) {
+	if strings.TrimSpace(connectorID) == "" || strings.TrimSpace(deviceID) == "" {
+		return InstallSession{}, fmt.Errorf("missing required fields")
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, ok := s.installSessions[id]
+	if !ok {
+		return InstallSession{}, ErrNotFound
+	}
+	session, expired := s.expireInstallIfNeeded(session)
+	if expired {
+		s.deleteInstallTokensForSessionLocked(session.ID)
+		s.installSessions[id] = session
+		return session, ErrExpired
+	}
+	if session.Status != InstallStatusRequested && session.Status != InstallStatusApproved {
+		return InstallSession{}, ErrInvalidTransition
+	}
+
+	session.ConnectorID = strings.TrimSpace(connectorID)
+	session.DeviceID = strings.TrimSpace(deviceID)
+	s.installSessions[id] = session
 	return session, nil
 }
 
@@ -267,6 +295,9 @@ func (s *InMemoryStore) SetInstallResult(id string, status InstallStatus, reason
 		return InstallSession{}, ErrInvalidTransition
 	}
 	if status != InstallStatusInstalled && status != InstallStatusFailed {
+		return InstallSession{}, ErrInvalidTransition
+	}
+	if status == InstallStatusInstalled && (strings.TrimSpace(session.ConnectorID) == "" || strings.TrimSpace(session.DeviceID) == "") {
 		return InstallSession{}, ErrInvalidTransition
 	}
 

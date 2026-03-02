@@ -187,3 +187,32 @@ func TestInstallSessionFailedTransition(t *testing.T) {
 		t.Fatalf("expected failure reason to be set")
 	}
 }
+
+func TestCreateInstallSessionWithoutIdentityThenRegister(t *testing.T) {
+	store := NewInMemoryStoreWithClock(&fakeClock{current: time.Now().UTC()})
+
+	session, _, err := store.CreateInstallSession(CreateInstallInput{
+		OpenClawUserID: "usr_1",
+		SourceChannel:  "telegram",
+		TTL:            10 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("unexpected create install session error: %v", err)
+	}
+	if session.ConnectorID != "" || session.DeviceID != "" {
+		t.Fatalf("expected empty identity on create, got connector=%q device=%q", session.ConnectorID, session.DeviceID)
+	}
+
+	session, err = store.SetInstallApproval(session.ID, true)
+	if err != nil {
+		t.Fatalf("unexpected approval error: %v", err)
+	}
+
+	session, err = store.SetInstallIdentity(session.ID, "conn_1", "dev_1")
+	if err != nil {
+		t.Fatalf("unexpected registration error: %v", err)
+	}
+	if session.ConnectorID != "conn_1" || session.DeviceID != "dev_1" {
+		t.Fatalf("expected updated identity, got connector=%q device=%q", session.ConnectorID, session.DeviceID)
+	}
+}

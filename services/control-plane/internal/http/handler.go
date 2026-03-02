@@ -24,6 +24,7 @@ type RequestStore interface {
 	CreateInstallSession(in requests.CreateInstallInput) (requests.InstallSession, string, error)
 	GetInstallSession(id string) (requests.InstallSession, error)
 	SetInstallApproval(id string, approved bool) (requests.InstallSession, error)
+	SetInstallIdentity(id string, connectorID string, deviceID string) (requests.InstallSession, error)
 	SetInstallResult(id string, status requests.InstallStatus, reasonCode string) (requests.InstallSession, error)
 	RedeemInstallToken(token string) (requests.InstallSession, error)
 }

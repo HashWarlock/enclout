@@ -197,6 +197,14 @@ func (c *Client) PostInstallResult(ctx context.Context, sessionID string, status
 	return c.postJSON(ctx, "/v1/install-sessions/"+url.PathEscape(sessionID)+"/result", body)
 }
 
+func (c *Client) RegisterInstallIdentity(ctx context.Context, sessionID string, connectorID string, deviceID string) error {
+	body := map[string]string{
+		"connector_id": connectorID,
+		"device_id":    deviceID,
+	}
+	return c.postJSON(ctx, "/v1/install-sessions/"+url.PathEscape(sessionID)+"/registration", body)
+}
+
 func (c *Client) postJSON(ctx context.Context, path string, body any) error {
 	raw, err := json.Marshal(body)
 	if err != nil {

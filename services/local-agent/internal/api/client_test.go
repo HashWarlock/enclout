@@ -139,3 +139,30 @@ func TestPostInstallResult(t *testing.T) {
 		t.Fatalf("unexpected body: %s", gotBody)
 	}
 }
+
+func TestRegisterInstallIdentity(t *testing.T) {
+	var gotPath string
+	var gotBody string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		raw, _ := io.ReadAll(r.Body)
+		gotBody = string(raw)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer srv.Close()
+
+	client := NewClient(srv.URL, "token")
+	err := client.RegisterInstallIdentity(context.Background(), "ins_1", "conn_auto_1", "dev_auto_1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if gotPath != "/v1/install-sessions/ins_1/registration" {
+		t.Fatalf("unexpected path: %s", gotPath)
+	}
+	if !strings.Contains(gotBody, `"connector_id":"conn_auto_1"`) {
+		t.Fatalf("unexpected body: %s", gotBody)
+	}
+	if !strings.Contains(gotBody, `"device_id":"dev_auto_1"`) {
+		t.Fatalf("unexpected body: %s", gotBody)
+	}
+}

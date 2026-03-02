@@ -124,6 +124,37 @@ func TestInstallSessionResultHandlerInstalledTransition(t *testing.T) {
 	}
 }
 
+func TestInstallSessionRegistrationHandlerSetsIdentity(t *testing.T) {
+	handler, store := newTestHandler(t)
+
+	created, _, err := store.CreateInstallSession(requests.CreateInstallInput{
+		OpenClawUserID: "usr_1",
+		SourceChannel:  "telegram",
+		TTL:            10 * time.Minute,
+	})
+	if err != nil {
+		t.Fatalf("unexpected create error: %v", err)
+	}
+	_, err = store.SetInstallApproval(created.ID, true)
+	if err != nil {
+		t.Fatalf("unexpected approval error: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/v1/install-sessions/"+created.ID+"/registration", strings.NewReader(`{"connector_id":"conn_1","device_id":"dev_1"}`))
+	rr := httptest.NewRecorder()
+	handler.InstallSessionRegistration(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d body=%s", rr.Code, rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"connector_id":"conn_1"`) {
+		t.Fatalf("expected connector_id in body, got %s", rr.Body.String())
+	}
+	if !strings.Contains(rr.Body.String(), `"device_id":"dev_1"`) {
+		t.Fatalf("expected device_id in body, got %s", rr.Body.String())
+	}
+}
+
 func TestGetInstallSessionStatus(t *testing.T) {
 	handler, store := newTestHandler(t)
 

@@ -33,32 +33,38 @@ Describe the operator sequence for channel-initiated connector access with local
 
 ## Install Bootstrap Flow (macOS Launchd + Linux Systemd)
 
-1. User requests install from a paired channel:
-   - `request_connector_install(connector_id, device_id?)`
-2. Control plane creates install session (`requested`) and returns one-time `install_token`.
+1. User requests to connect from a paired channel:
+   - `request_connector_connect()`
+2. Control plane creates install session (`requested`) and returns:
+   - one-time `install_token`
+   - clickable `install_url`
 3. OpenClaw agent approves install session:
    - `approve_install_session(install_session_id, approved=true)`
-4. On device, user runs local installer with token (`cmd/install`).
+4. User clicks `install_url` and runs local installer on device.
 5. Installer redeems token once:
    - valid + approved -> session details returned
    - invalid/replayed/expired -> fail closed
-6. Installer writes OS service config and starts local agent service:
+6. Installer auto-registers discovered identity:
+   - `connector_id`
+   - `device_id`
+7. Installer writes OS service config and starts local agent service:
    - macOS: `launchd` plist
    - Linux: `systemd --user` unit
-7. Installer posts install result:
+8. Installer posts install result:
    - `installed` on success
    - `failed` with reason code on failure
-8. Channel polls install status and shows progress to user.
-9. Channel receives install outcome and can proceed with normal `request_connector_access`.
+9. Channel polls install status and shows progress to user.
+10. Channel receives install outcome and can proceed with normal `request_connector_access` using registered IDs from session.
 
 ### Chat Contract (Install)
 
-`request_connector_install` response includes:
+`request_connector_connect` response includes:
 
 - `install_session_id`
 - `status`
 - `expires_at`
 - `install_token`
+- `install_url`
 - `install_commands.darwin`
 - `install_commands.linux`
 

@@ -114,6 +114,11 @@ type InstallSessionResultBody struct {
 	ReasonCode string `json:"reason_code"`
 }
 
+type InstallSessionRegistrationBody struct {
+	ConnectorID string `json:"connector_id"`
+	DeviceID    string `json:"device_id"`
+}
+
 func (h *Handler) GetInstallSession(w http.ResponseWriter, r *http.Request) {
 	id, err := parseIDFromPath(r.URL.Path, "/v1/install-sessions/", "")
 	if err != nil {
@@ -162,6 +167,37 @@ func (h *Handler) InstallSessionResult(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "invalid_transition", http.StatusConflict)
 		default:
 			http.Error(w, "result_failed", http.StatusInternalServerError)
+		}
+		return
+	}
+
+	writeJSON(w, http.StatusOK, updated)
+}
+
+func (h *Handler) InstallSessionRegistration(w http.ResponseWriter, r *http.Request) {
+	id, err := parseIDFromPath(r.URL.Path, "/v1/install-sessions/", "/registration")
+	if err != nil {
+		http.Error(w, "invalid_path", http.StatusBadRequest)
+		return
+	}
+
+	var body InstallSessionRegistrationBody
+	if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+		http.Error(w, "invalid_json", http.StatusBadRequest)
+		return
+	}
+
+	updated, err := h.store.SetInstallIdentity(id, body.ConnectorID, body.DeviceID)
+	if err != nil {
+		switch {
+		case errors.Is(err, requests.ErrNotFound):
+			http.Error(w, "not_found", http.StatusNotFound)
+		case errors.Is(err, requests.ErrExpired):
+			http.Error(w, "install_session_expired", http.StatusGone)
+		case errors.Is(err, requests.ErrInvalidTransition):
+			http.Error(w, "invalid_transition", http.StatusConflict)
+		default:
+			http.Error(w, "registration_failed", http.StatusBadRequest)
 		}
 		return
 	}

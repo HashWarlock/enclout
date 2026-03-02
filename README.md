@@ -108,10 +108,11 @@ Optional:
 
 ## Install Bootstrap (macOS + Linux)
 
-For install bootstrap from any paired channel:
+For URL-first connect bootstrap from any paired channel:
 
-1. Request install from any paired chat channel through OpenClaw intent `request_connector_install`.
-2. Use the returned one-time `install_token` and run the installer.
+1. Request connect through OpenClaw intent `request_connector_connect`.
+2. Share/click the returned `install_url`.
+3. Run installer with the one-time `install_token` (direct command or landing page instruction).
 
 macOS (`launchd`):
 
@@ -133,7 +134,7 @@ go run ./services/local-agent/cmd/install -- \
   -agent-bin "/usr/local/bin/enclout-agent"
 ```
 
-3. Installer redeems token, configures OS service (`launchd` or `systemd --user`), starts the agent, and posts install result (`installed` or `failed`) back to control plane.
+4. Installer redeems token, auto-registers `connector_id` + `device_id`, configures OS service (`launchd` or `systemd --user`), starts the agent, and posts install result (`installed` or `failed`) back to control plane.
 
 ## OpenClaw Agent Skill (Dynamic, Optional)
 
@@ -154,7 +155,7 @@ Install skill HashWarlock/enclout@enclout-openclaw-agent and use it for the conn
 
 User experience note:
 
-- The skill should only ask the user for `connector_id` and optional `device_id`.
+- The skill should not ask for `connector_id`/`device_id` up front.
 - `API_AUTH_TOKEN`, `CONTROL_PLANE_URL`, and OpenClaw identity/channel context must be runtime-resolved.
 
 Local fallback (when running from checked-out repo):
@@ -206,13 +207,14 @@ List installed skills and confirm enclout-openclaw-agent is available.
 6. Run a chat smoke test from any paired channel:
 
 ```text
-Install enclout connector <connector_id> on device <device_id> from this channel.
+Connect me to this device.
 ```
 
 Expected flow:
 
-1. Agent calls `request_connector_install`.
-2. Agent calls `approve_install_session`.
-3. You run the returned `enclout install` command on the target device.
-4. Agent polls `GET /v1/install-sessions/{id}` until terminal state.
-5. Agent proceeds with `request_connector_access` after `installed`.
+1. Agent calls `request_connector_connect`.
+2. Agent sends clickable `install_url`.
+3. Agent calls `approve_install_session`.
+4. You run the returned `enclout install` command on the target device.
+5. Agent polls `GET /v1/install-sessions/{id}` until terminal state.
+6. Agent reads `connector_id` + `device_id` from install session and proceeds with `request_connector_access`.

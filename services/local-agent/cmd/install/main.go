@@ -61,6 +61,8 @@ func runWithDeps(
 	agentToken := fs.String("agent-token", envOrEmpty(lookupEnv, "AGENT_TOKEN"), "control-plane API bearer token")
 	localUsername := fs.String("local-username", envOrEmpty(lookupEnv, "LOCAL_USERNAME"), "local account username")
 	dcapVerifierURL := fs.String("dcap-verifier-url", envOrEmpty(lookupEnv, "DCAP_VERIFIER_URL"), "dcap verifier base url")
+	connectorID := fs.String("connector-id", envOrEmpty(lookupEnv, "CONNECTOR_ID"), "connector id override")
+	deviceID := fs.String("device-id", envOrEmpty(lookupEnv, "DEVICE_ID"), "device id override")
 	servicePath := fs.String("service-path", "", "service file path")
 	plistPath := fs.String("plist-path", "", "deprecated alias for -service-path")
 	fs.SetOutput(os.Stderr)
@@ -110,6 +112,12 @@ func runWithDeps(
 	env := buildInstallEnv(*localUsername, *controlPlaneURL, *dcapVerifierURL, func(key string) string {
 		return envOrEmpty(lookupEnv, key)
 	})
+	if v := strings.TrimSpace(*connectorID); v != "" {
+		env["CONNECTOR_ID"] = v
+	}
+	if v := strings.TrimSpace(*deviceID); v != "" {
+		env["DEVICE_ID"] = v
+	}
 
 	client := api.NewClient(*controlPlaneURL, *agentToken)
 	installer := newInstaller()
@@ -148,6 +156,8 @@ func buildInstallEnv(localUsername string, controlPlaneURL string, dcapVerifierU
 		"MANAGED_KEYS_DIR",
 		"ALLOW_MRTD",
 		"ALLOW_RTMR3",
+		"CONNECTOR_ID",
+		"DEVICE_ID",
 		"CONTROL_PLANE_SIGNING_KEYS_JSON",
 		"CONTROL_PLANE_SIGNING_PUBKEY_B64",
 		"CONTROL_PLANE_SIGNING_KID",

@@ -3,6 +3,8 @@ package install
 import (
 	"context"
 	"fmt"
+	"os"
+	"regexp"
 	"strings"
 
 	"enclout/services/local-agent/internal/api"
@@ -15,10 +17,12 @@ const (
 	InstallFailureInvalidConfig = "InvalidConfig"
 	InstallFailureLaunchd       = "LaunchdInstallError"
 	InstallFailureSystemd       = "SystemdInstallError"
+	InstallFailureRegistration  = "IdentityRegistrationError"
 )
 
 type InstallerAPI interface {
 	RedeemInstallToken(ctx context.Context, token string) (api.InstallSession, error)
+	RegisterInstallIdentity(ctx context.Context, sessionID string, connectorID string, deviceID string) error
 	PostInstallResult(ctx context.Context, sessionID string, status string, reasonCode string) error
 }
 
@@ -51,12 +55,15 @@ func Run(ctx context.Context, client InstallerAPI, installer ServiceInstaller, c
 	}
 
 	env := copyEnv(cfg.Env)
-	if strings.TrimSpace(env["DEVICE_ID"]) == "" {
-		env["DEVICE_ID"] = session.DeviceID
-	}
+	connectorID, deviceID := resolveInstallIdentity(env, session)
+	env["CONNECTOR_ID"] = connectorID
+	env["DEVICE_ID"] = deviceID
 
 	if err := validateConfig(cfg, env); err != nil {
 		return failInstall(ctx, client, session.ID, InstallFailureInvalidConfig, err)
+	}
+	if err := client.RegisterInstallIdentity(ctx, session.ID, connectorID, deviceID); err != nil {
+		return failInstall(ctx, client, session.ID, InstallFailureRegistration, err)
 	}
 
 	serviceCfg := ServiceConfig{
@@ -110,4 +117,38 @@ func failInstall(ctx context.Context, client InstallerAPI, sessionID string, rea
 		return cause
 	}
 	return fmt.Errorf("%w (also failed to post install result: %v)", cause, postErr)
+}
+
+func resolveInstallIdentity(env map[string]string, session api.InstallSession) (string, string) {
+	connectorID := strings.TrimSpace(env["CONNECTOR_ID"])
+	if connectorID == "" {
+		connectorID = strings.TrimSpace(session.ConnectorID)
+	}
+	if connectorID == "" {
+		connectorID = defaultIdentityID("conn")
+	}
+
+	deviceID := strings.TrimSpace(env["DEVICE_ID"])
+	if deviceID == "" {
+		deviceID = strings.TrimSpace(session.DeviceID)
+	}
+	if deviceID == "" {
+		deviceID = defaultIdentityID("dev")
+	}
+
+	return connectorID, deviceID
+}
+
+func defaultIdentityID(prefix string) string {
+	host, err := os.Hostname()
+	if err != nil {
+		host = ""
+	}
+	host = strings.ToLower(strings.TrimSpace(host))
+	host = regexp.MustCompile(`[^a-z0-9-]+`).ReplaceAllString(host, "-")
+	host = strings.Trim(host, "-")
+	if host == "" {
+		host = "local"
+	}
+	return prefix + "_" + host
 }

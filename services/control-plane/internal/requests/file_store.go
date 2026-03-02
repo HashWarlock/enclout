@@ -154,6 +154,20 @@ func (s *FileStore) SetInstallResult(id string, status InstallStatus, reasonCode
 	return session, nil
 }
 
+func (s *FileStore) SetInstallIdentity(id string, connectorID string, deviceID string) (InstallSession, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	session, err := s.mem.SetInstallIdentity(id, connectorID, deviceID)
+	if err != nil {
+		return InstallSession{}, err
+	}
+	if err := s.persistLocked(); err != nil {
+		return InstallSession{}, err
+	}
+	return session, nil
+}
+
 func (s *FileStore) RedeemInstallToken(token string) (InstallSession, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()

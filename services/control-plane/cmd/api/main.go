@@ -2,6 +2,8 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
+	"html/template"
 	"log"
 	"net/http"
 	"os"
@@ -58,6 +60,8 @@ func main() {
 			requireAuth(api.GetInstallSession)(w, r)
 		case strings.HasSuffix(r.URL.Path, "/approval") && r.Method == http.MethodPost:
 			requireAuth(api.InstallSessionApproval)(w, r)
+		case strings.HasSuffix(r.URL.Path, "/registration") && r.Method == http.MethodPost:
+			requireAuth(api.InstallSessionRegistration)(w, r)
 		case strings.HasSuffix(r.URL.Path, "/result") && r.Method == http.MethodPost:
 			requireAuth(api.InstallSessionResult)(w, r)
 		default:
@@ -67,6 +71,7 @@ func main() {
 	mux.HandleFunc("/v1/devices/", requireAuth(methodOnly(http.MethodGet, api.ListPendingRequestsForDevice)))
 	mux.HandleFunc("/v1/openclaw/intents", requireAuth(methodOnly(http.MethodPost, openClawHandler.Handle)))
 	mux.HandleFunc("/v1/signing-keys", requireAuth(methodOnly(http.MethodGet, api.SigningKeys)))
+	mux.HandleFunc("/install", methodOnly(http.MethodGet, serveInstallLanding))
 	mux.HandleFunc("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
@@ -100,4 +105,53 @@ func loadBundleTemplatesFromEnv() map[string]handlers.BundleTemplate {
 		return map[string]handlers.BundleTemplate{}
 	}
 	return out
+}
+
+func serveInstallLanding(w http.ResponseWriter, r *http.Request) {
+	token := strings.TrimSpace(r.URL.Query().Get("token"))
+	if token == "" {
+		http.Error(w, "missing token", http.StatusBadRequest)
+		return
+	}
+
+	controlPlaneURL := requestBaseURL(r)
+	command := fmt.Sprintf(
+		`CONTROL_PLANE_URL=%q DCAP_VERIFIER_URL="<dcap_verifier_url>" enclout install -token %q -agent-bin "/usr/local/bin/enclout-agent"`,
+		controlPlaneURL,
+		token,
+	)
+
+	const page = `<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><title>Install enclout Connector</title></head>
+<body>
+<h1>Install enclout Connector</h1>
+<p>Run this command on the target device:</p>
+<pre><code>{{ .Command }}</code></pre>
+<p>After install completes, return to chat to continue connection setup.</p>
+</body>
+</html>`
+	t := template.Must(template.New("install").Parse(page))
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	_ = t.Execute(w, struct {
+		Command string
+	}{
+		Command: command,
+	})
+}
+
+func requestBaseURL(r *http.Request) string {
+	host := r.Host
+	if forwardedHost := r.Header.Get("X-Forwarded-Host"); forwardedHost != "" {
+		host = forwardedHost
+	}
+
+	scheme := "http"
+	if r.TLS != nil {
+		scheme = "https"
+	}
+	if forwardedProto := r.Header.Get("X-Forwarded-Proto"); forwardedProto != "" {
+		scheme = forwardedProto
+	}
+	return scheme + "://" + host
 }

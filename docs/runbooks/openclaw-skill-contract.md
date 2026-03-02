@@ -19,23 +19,22 @@ Skill distribution:
 
 Agent UX rule:
 
-- End users should only provide user-facing values (`connector_id`, optional `device_id`).
+- End users should start with a connect request and install link flow.
+- Do not ask for `connector_id`/`device_id` up front.
 - Runtime values (`API_AUTH_TOKEN`, `CONTROL_PLANE_URL`, `openclaw_user_id`, `source_channel`) must come from agent/runtime context.
 
 ## Intents
 
-### 1) `request_connector_install`
+### 1) `request_connector_connect` (URL-First)
 
-Use when a user asks to install/enable the connector on a target device.
+Use when a user asks to connect and connector install may be required.
 
 Request:
 
 ```json
 {
-  "intent": "request_connector_install",
+  "intent": "request_connector_connect",
   "openclaw_user_id": "usr_1",
-  "connector_id": "conn_1",
-  "device_id": "dev_1",
   "source_channel": "telegram"
 }
 ```
@@ -46,6 +45,7 @@ Response `201 Created`:
 {
   "install_session_id": "ins_1",
   "install_token": "tok_1",
+  "install_url": "https://control-plane.example/install?token=tok_1",
   "status": "requested",
   "expires_at": "2026-02-24T17:05:00Z",
   "install_commands": {
@@ -58,9 +58,14 @@ Response `201 Created`:
 Notes:
 
 - `install_token` is one-time and short-lived; do not log it in plaintext.
+- Prefer `install_url` as primary UX.
 - Use `install_commands.darwin` or `.linux` based on user device OS.
 
-### 2) `approve_install_session`
+### 2) `request_connector_install` (Backward-Compatible)
+
+Supported for direct install flow when `connector_id` and `device_id` are already known.
+
+### 3) `approve_install_session`
 
 Use after user confirms they want to proceed.
 
@@ -92,7 +97,7 @@ Response `200 OK`:
 
 If `approved` is `false`, status transitions to `failed` with `reason_code` `Denied`.
 
-### 3) `install_session_result`
+### 4) `install_session_result`
 
 Used by the installer/local agent to report terminal install outcome.
 
@@ -114,9 +119,9 @@ Allowed `status` values:
 
 Response `200 OK`: updated install session object.
 
-### 4) `request_connector_access`
+### 5) `request_connector_access`
 
-Use after install succeeds (or connector is already installed) to start normal access flow.
+Use after install succeeds and install session now contains `connector_id` + `device_id`.
 
 Request:
 
@@ -153,13 +158,14 @@ States:
 
 ## Recommended Agent Flow (Any Paired Channel)
 
-1. Receive user request from paired channel.
-2. Call `request_connector_install`.
-3. Present OS-specific install command from `install_commands`.
+1. Receive user connect request from paired channel.
+2. Call `request_connector_connect`.
+3. Send `install_url` to user and approve session.
 4. Call `approve_install_session`.
 5. Poll `GET /v1/install-sessions/{id}` every 2-3 seconds.
 6. Stop polling on `installed` or `failed`, then report result to user.
-7. On `installed`, call `request_connector_access` for normal connection flow.
+7. On `installed`, read `connector_id` and `device_id` from session.
+8. Call `request_connector_access` with these bound IDs.
 
 ## Error Handling
 

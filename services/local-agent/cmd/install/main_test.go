@@ -107,6 +107,8 @@ func (f *fakeControlPlaneInstallAPI) ServeHTTP(w http.ResponseWriter, r *http.Re
 		f.handleRedeem(w, r)
 	case r.Method == http.MethodGet && strings.HasPrefix(r.URL.Path, "/v1/install-sessions/") && !strings.Contains(strings.TrimPrefix(r.URL.Path, "/v1/install-sessions/"), "/"):
 		f.handleGetSession(w, r)
+	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1/install-sessions/") && strings.HasSuffix(r.URL.Path, "/registration"):
+		f.handleRegistration(w, r)
 	case r.Method == http.MethodPost && strings.HasPrefix(r.URL.Path, "/v1/install-sessions/") && strings.HasSuffix(r.URL.Path, "/result"):
 		f.handleResult(w, r)
 	default:
@@ -145,6 +147,30 @@ func (f *fakeControlPlaneInstallAPI) handleIntent(w http.ResponseWriter, r *http
 			"source_channel":   session.SourceChannel,
 			"status":           session.Status,
 			"install_token":    tok,
+		})
+	case "request_connector_connect":
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		f.nextID++
+		f.nextTok++
+		id := fmt.Sprintf("ins_%d", f.nextID)
+		tok := fmt.Sprintf("tok_%d", f.nextTok)
+		session := installSessionState{
+			ID:             id,
+			OpenClawUserID: stringFromMap(body, "openclaw_user_id"),
+			SourceChannel:  stringFromMap(body, "source_channel"),
+			Status:         "requested",
+		}
+		f.sessions[id] = session
+		f.tokens[tok] = id
+		writeJSON(w, http.StatusCreated, map[string]any{
+			"id":                 session.ID,
+			"openclaw_user_id":   session.OpenClawUserID,
+			"source_channel":     session.SourceChannel,
+			"status":             session.Status,
+			"install_session_id": id,
+			"install_token":      tok,
+			"install_url":        "/install?token=" + tok,
 		})
 	case "approve_install_session":
 		id := stringFromMap(body, "install_session_id")
@@ -204,6 +230,24 @@ func (f *fakeControlPlaneInstallAPI) handleResult(w http.ResponseWriter, r *http
 	}
 	session.Status = stringFromMap(body, "status")
 	session.ReasonCode = stringFromMap(body, "reason_code")
+	f.sessions[id] = session
+	writeJSON(w, http.StatusOK, session)
+}
+
+func (f *fakeControlPlaneInstallAPI) handleRegistration(w http.ResponseWriter, r *http.Request) {
+	id := strings.TrimSuffix(strings.TrimPrefix(r.URL.Path, "/v1/install-sessions/"), "/registration")
+	var body map[string]any
+	_ = json.NewDecoder(r.Body).Decode(&body)
+
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	session, ok := f.sessions[id]
+	if !ok {
+		http.Error(w, "not_found", http.StatusNotFound)
+		return
+	}
+	session.ConnectorID = stringFromMap(body, "connector_id")
+	session.DeviceID = stringFromMap(body, "device_id")
 	f.sessions[id] = session
 	writeJSON(w, http.StatusOK, session)
 }
@@ -441,5 +485,54 @@ func TestRunEndToEndInstallFlowLinuxSystemd(t *testing.T) {
 	got := apiState.session(sessionID)
 	if got.Status != "installed" {
 		t.Fatalf("expected installed session status, got %q", got.Status)
+	}
+}
+
+func TestRunEndToEndInstallFlowURLFirstBindsIdentity(t *testing.T) {
+	apiState := newFakeControlPlaneInstallAPI()
+	server := httptest.NewServer(apiState)
+	defer server.Close()
+
+	client := server.Client()
+	createResp := postJSON(t, client, server.URL+"/v1/openclaw/intents", `{
+		"intent":"request_connector_connect",
+		"openclaw_user_id":"usr_1",
+		"source_channel":"telegram"
+	}`)
+	sessionID := createResp["install_session_id"].(string)
+	installToken := createResp["install_token"].(string)
+
+	_ = postJSON(t, client, server.URL+"/v1/openclaw/intents", `{
+		"intent":"approve_install_session",
+		"install_session_id":"`+sessionID+`",
+		"approved":true
+	}`)
+
+	fakeInstaller := &fakeLaunchdInstaller{}
+	err := runWithDeps(
+		context.Background(),
+		[]string{
+			"-token", installToken,
+			"-agent-bin", "/usr/local/bin/enclout-agent",
+			"-control-plane-url", server.URL,
+			"-dcap-verifier-url", "http://127.0.0.1:9000",
+			"-local-username", "alice",
+			"-plist-path", filepath.Join(t.TempDir(), "ai.enclout.agent.plist"),
+		},
+		func(_ string) (string, bool) { return "", false },
+		"darwin",
+		func() install.ServiceInstaller { return fakeInstaller },
+		install.Run,
+	)
+	if err != nil {
+		t.Fatalf("unexpected run error: %v", err)
+	}
+
+	got := apiState.session(sessionID)
+	if got.Status != "installed" {
+		t.Fatalf("expected installed session status, got %q", got.Status)
+	}
+	if got.ConnectorID == "" || got.DeviceID == "" {
+		t.Fatalf("expected registered connector/device identity, got connector=%q device=%q", got.ConnectorID, got.DeviceID)
 	}
 }

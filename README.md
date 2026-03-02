@@ -169,15 +169,18 @@ Then confirm enclout-openclaw-agent is loaded.
 After that, for connect requests, run URL-first flow:
 request_connector_connect -> send install_url -> approve_install_session -> poll install session -> request_connector_access.
 Never ask end users for API_AUTH_TOKEN, CONTROL_PLANE_URL, openclaw_user_id, source_channel, connector_id (before install), or device_id (before install).
-If runtime config is missing, return exactly:
-"Operator action needed: missing runtime config/secrets in agent container (API_AUTH_TOKEN and/or CONTROL_PLANE_URL). End user does not need to provide these."
+Derive control-plane base URL from the active OpenClaw gateway/session origin.
+Use gateway session auth by default; if explicit bearer is required, generate a short-lived bearer via deterministic key generator capability.
+If gateway URL/auth context cannot be resolved, return exactly:
+"Operator action needed: OpenClaw gateway auth context unavailable (cannot resolve gateway URL or generate session bearer). End user does not need to provide tokens or URLs."
 ```
 
 User experience note:
 
 - The skill should not ask for `connector_id`/`device_id` up front.
-- `API_AUTH_TOKEN`, `CONTROL_PLANE_URL`, and OpenClaw identity/channel context must be runtime-resolved.
-- If those runtime values are missing, return operator error; do not ask the end user for env vars.
+- OpenClaw identity/channel context must be runtime-resolved.
+- Control-plane URL/auth must be derived dynamically from gateway/session context.
+- If gateway URL/auth context is missing, return operator error; do not ask the end user for tokens or URLs.
 
 ### Agent Prompt Contract (Important)
 
@@ -188,12 +191,13 @@ When using `enclout-openclaw-agent`, the chat agent must follow this behavior:
    `connector_id` (before install), or `device_id` (before install).
 2. Start with URL-first flow:
    `request_connector_connect` -> `install_url` -> approval -> polling.
-3. If runtime config is missing, return an operator-facing error instead of a user prompt.
+3. Derive control-plane URL/auth from active gateway/session context; do not require static env values in chat flow.
+4. If gateway URL/auth context is unavailable, return an operator-facing error instead of a user prompt.
 
 Expected operator-facing error style:
 
 ```text
-Operator action needed: missing runtime config/secrets in agent container (API_AUTH_TOKEN and/or CONTROL_PLANE_URL). End user does not need to provide these.
+Operator action needed: OpenClaw gateway auth context unavailable (cannot resolve gateway URL or generate session bearer). End user does not need to provide tokens or URLs.
 ```
 
 Local fallback (when running from checked-out repo):
@@ -253,7 +257,8 @@ If the agent still asks the user for env vars or IDs, send this correction promp
 ```text
 Stop requesting runtime/operator values from end users.
 Use enclout-openclaw-agent URL-first flow only.
-If runtime config/secrets are missing, return operator-action error only.
+Derive gateway URL/auth context dynamically; do not require static token/URL env vars.
+If gateway URL/auth context is missing, return operator-action error only.
 ```
 
 Expected flow:

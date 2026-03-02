@@ -7,22 +7,23 @@ This contract is channel-agnostic: any paired channel can use it by setting `sou
 
 Skill distribution:
 
-- Recommended dynamic install: `npx skills add HashWarlock/enclout --skill enclout-openclaw-agent -g -y`
-- Reliable fallback: `npx skills add https://github.com/HashWarlock/enclout/tree/main/skills/enclout-openclaw-agent -g -y`
+- Recommended dynamic install: `npx skills add HashWarlock/enclout --skill enclout-openclaw-agent -a openclaw -g -y`
+- Reliable fallback: `npx skills add https://github.com/HashWarlock/enclout/tree/main/skills/enclout-openclaw-agent -a openclaw -g -y`
 - Repository skill source: `skills/enclout-openclaw-agent`
 - Local fallback installer: `scripts/install-enclout-skill.sh`
 
 ## Transport
 
-- Endpoint: `POST /v1/openclaw/intents`
-- Auth: `Authorization: Bearer <API_AUTH_TOKEN>`
+- Endpoint: `POST /v1/openclaw/intents` on the active OpenClaw gateway/session origin
+- Auth: use gateway session auth by default; if explicit bearer is required, mint a short-lived bearer with the runtime deterministic key generator capability
 - Content type: `application/json`
 
 Agent UX rule:
 
 - End users should start with a connect request and install link flow.
 - Do not ask for `connector_id`/`device_id` up front.
-- Runtime values (`API_AUTH_TOKEN`, `CONTROL_PLANE_URL`, `openclaw_user_id`, `source_channel`) must come from agent/runtime context.
+- Derive `openclaw_user_id` and `source_channel` from agent/runtime context.
+- Derive control-plane URL/auth context from the gateway/session dynamically; do not require static `API_AUTH_TOKEN` or `CONTROL_PLANE_URL` in paired-channel chat flow.
 
 ## Intents
 
@@ -146,7 +147,8 @@ Endpoint:
 
 Auth:
 
-- `Authorization: Bearer <API_AUTH_TOKEN>`
+- Use gateway session auth by default.
+- If explicit bearer is required, mint a short-lived bearer using the runtime deterministic key generator capability.
 
 Response `200 OK` returns current install session state.
 
@@ -182,3 +184,4 @@ Agent behavior:
 - Treat `install_session_expired` and terminal `failed` as hard stop.
 - Never reuse an `install_token`.
 - Do not continue to access flow unless install status is `installed` or install was already complete.
+- If gateway URL/auth context cannot be resolved, return operator-facing gateway-context error (do not ask end user for tokens/URLs).

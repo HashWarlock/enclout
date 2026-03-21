@@ -1,6 +1,0 @@
-{
-  "intent": "install_session_result",
-  "install_session_id": "<install_session_id>",
-  "status": "<installed_or_failed>",
-  "reason_code": "<reason_code_or_empty>"
-}

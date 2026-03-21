@@ -1,7 +1,0 @@
-{
-  "intent": "request_connector_access",
-  "openclaw_user_id": "<openclaw_user_id>",
-  "connector_id": "<connector_id>",
-  "device_id": "<device_id_optional>",
-  "source_channel": "<source_channel>"
-}

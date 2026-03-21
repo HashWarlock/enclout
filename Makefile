@@ -1,4 +1,4 @@
-.PHONY: build test lint clean
+.PHONY: build test lint clean install
 
 build:
 	go build -o bin/enclout ./cmd/enclout
@@ -11,3 +11,6 @@ lint:
 
 clean:
 	rm -rf bin/
+
+install: build
+	cp bin/enclout /usr/local/bin/enclout

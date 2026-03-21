@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"enclout/internal/config"
+	"enclout/internal/identity"
 	"enclout/internal/server"
 	"enclout/internal/signing"
 	"enclout/internal/store"
@@ -80,16 +81,23 @@ func serveCmd() *cobra.Command {
 				Signer:   signer,
 			}
 
+			// Set up graceful shutdown context.
+			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+			defer stop()
+
+			// Auto-register connector bundle if connector-id is set.
+			if cfg.ConnectorID != "" {
+				if err := registerConnectorBundle(ctx, cfg.ConnectorID, deps.Bundles, logger); err != nil {
+					logger.Warn("connector auto-registration failed", "error", err)
+				}
+			}
+
 			// Create server.
 			srv := server.New(server.Config{
 				Bind:      cfg.Bind,
 				AuthToken: cfg.AuthToken,
 				Logger:    logger,
 			}, deps)
-
-			// Set up graceful shutdown context.
-			ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
-			defer stop()
 
 			// Start expiration goroutine.
 			srv.StartExpiration(ctx)
@@ -159,6 +167,49 @@ func newLogger(format string) *slog.Logger {
 		handler = slog.NewTextHandler(os.Stderr, nil)
 	}
 	return slog.New(handler)
+}
+
+// registerConnectorBundle derives a TEE identity and registers the connector
+// bundle in the local database on startup.
+func registerConnectorBundle(ctx context.Context, connectorID string, bundles *store.BundleRepository, logger *slog.Logger) error {
+	endpoint := os.Getenv("DSTACK_SIMULATOR_ENDPOINT")
+	if endpoint == "" {
+		endpoint = "http://localhost:8090"
+	}
+
+	client := identity.NewDstackClient(endpoint)
+	deriver := identity.NewDstackDeriver(client)
+
+	logger.Info("deriving TEE identity", "connector_id", connectorID, "dstack_endpoint", endpoint)
+
+	id, att, err := deriver.DeriveIdentity(ctx, connectorID)
+	if err != nil {
+		return fmt.Errorf("derive identity: %w", err)
+	}
+
+	bundle := store.ConnectorBundle{
+		ConnectorID:   id.ConnectorID,
+		SSHPublicKey:  id.SSHPublicKey,
+		QuoteHex:      att.QuoteHex,
+		EventLog:      att.EventLog,
+		MRTD:          att.MRTD,
+		RTMR0:         att.RTMR0,
+		RTMR1:         att.RTMR1,
+		RTMR2:         att.RTMR2,
+		RTMR3:         att.RTMR3,
+		PolicyVersion: att.PolicyVersion,
+	}
+
+	if err := bundles.Register(ctx, bundle); err != nil {
+		return fmt.Errorf("register bundle: %w", err)
+	}
+
+	logger.Info("connector registered",
+		"connector_id", connectorID,
+		"fingerprint", id.FingerprintSHA256,
+		"ssh_public_key", id.SSHPublicKey,
+	)
+	return nil
 }
 
 // bindEnvDefaults checks each flag; if it was not explicitly set on the command

@@ -1,0 +1,16 @@
+services:
+  enclout:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      - ENCLOUT_AUTH_TOKEN=${ENCLOUT_AUTH_TOKEN}
+      - ENCLOUT_SIGNING_KEY_B64=${ENCLOUT_SIGNING_KEY_B64}
+      - ENCLOUT_CONNECTOR_ID=${ENCLOUT_CONNECTOR_ID:-}
+      - ENCLOUT_LOG_FORMAT=json
+      - DSTACK_SIMULATOR_ENDPOINT=http://localhost:8090
+    volumes:
+      - enclout-data:/data
+
+volumes:
+  enclout-data:

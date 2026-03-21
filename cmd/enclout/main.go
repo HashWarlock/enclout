@@ -23,6 +23,9 @@ func main() {
 		},
 	})
 
+	root.AddCommand(serveCmd())
+	root.AddCommand(agentCmd())
+
 	if err := root.Execute(); err != nil {
 		os.Exit(1)
 	}

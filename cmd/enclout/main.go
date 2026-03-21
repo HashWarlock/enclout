@@ -25,6 +25,10 @@ func main() {
 
 	root.AddCommand(serveCmd())
 	root.AddCommand(agentCmd())
+	root.AddCommand(mcpCmd())
+	root.AddCommand(connectCmd())
+	root.AddCommand(installCmd())
+	root.AddCommand(statusCmd())
 
 	if err := root.Execute(); err != nil {
 		os.Exit(1)

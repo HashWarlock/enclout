@@ -119,6 +119,8 @@ enclout/
 ├── migrations/
 │   └── 001_initial.sql
 │
+├── testdata/                    # golden test fixtures (SSH key outputs, etc.)
+│
 ├── go.mod
 ├── go.sum
 └── Makefile
@@ -169,7 +171,42 @@ func (r *ConnectionRequest) SetResult(status Status, reason string) error
 
 ### InstallSession (access/session.go)
 
-Same pattern — `RequesterID` + `Source`, transitions on the type.
+```go
+type InstallStatus string
+
+const (
+    InstallStatusRequested InstallStatus = "requested"
+    InstallStatusApproved  InstallStatus = "approved"
+    InstallStatusInstalled InstallStatus = "installed"
+    InstallStatusFailed    InstallStatus = "failed"
+)
+
+type InstallSession struct {
+    ID          string
+    RequesterID string
+    DeviceID    string        // empty until registered
+    ConnectorID string        // empty until registered
+    Source      string
+    Status      InstallStatus
+    TokenDigest string        // SHA256 of the one-time install token; cleared on redeem/expiry
+    CreatedAt   time.Time
+    ExpiresAt   time.Time
+    ReasonCode  string
+}
+```
+
+State transitions on the type:
+
+```go
+func (s *InstallSession) Approve() error   // requested -> approved
+func (s *InstallSession) Deny() error      // requested -> failed (reason: "Denied")
+func (s *InstallSession) Register(connectorID, deviceID string) error  // requested|approved, sets identity fields
+func (s *InstallSession) Complete() error  // approved (with identity) -> installed
+func (s *InstallSession) Fail(reason string) error  // approved -> failed
+func (s *InstallSession) Expire() error    // requested|approved -> failed (reason: "Expired")
+```
+
+Token lifecycle: `TokenDigest` is set on creation, used for single-redemption lookup, and cleared when the session reaches a terminal state or is redeemed. The `UNIQUE` index on `token_digest` in SQLite enforces single-use at the database level.
 
 ### ConnectorIdentity (identity/)
 
@@ -196,6 +233,58 @@ type Deriver interface {
 ```
 
 Two implementations: `DstackDeriver` (real TEE) and `EnvDeriver` (dev/testing).
+
+### Connector Bundle Source (server/bundles.go)
+
+The existing system uses a `StaticBundleSource` loaded from `CONNECTOR_BUNDLE_TEMPLATES_JSON` at startup. This maps connector IDs to their attestation data (SSH public key, quote, measurements). The refactored design replaces this with a **database-backed `BundleRepository`**:
+
+```go
+// store/bundles.go
+type BundleRepository interface {
+    Register(ctx context.Context, bundle ConnectorBundle) error
+    Get(ctx context.Context, connectorID string) (ConnectorBundle, error)
+    List(ctx context.Context) ([]ConnectorBundle, error)
+}
+
+type ConnectorBundle struct {
+    ConnectorID              string
+    SSHPublicKey             string
+    QuoteHex                 string
+    EventLog                 string
+    MRTD                     string
+    RTMR0, RTMR1, RTMR2, RTMR3 string
+    PolicyVersion            string
+    RegisteredAt             time.Time
+}
+```
+
+**Registration flow:** The TEE connector runs `enclout serve` with access to the dstack socket. On startup (or via a `POST /v1/connectors/register` endpoint), it calls `Deriver.DeriveIdentity()`, then stores the resulting `ConnectorBundle` in SQLite via `BundleRepository.Register()`. This replaces the static env var JSON blob with a dynamic registration that persists across restarts.
+
+The `GET /v1/requests/{id}/bundle` handler reads from `BundleRepository.Get()` instead of `StaticBundleSource.GetBundle()`, then signs the payload as before.
+
+Additional SQL migration for the bundle table:
+
+```sql
+CREATE TABLE connector_bundles (
+    connector_id   TEXT PRIMARY KEY,
+    ssh_public_key TEXT NOT NULL,
+    quote_hex      TEXT NOT NULL,
+    event_log      TEXT NOT NULL DEFAULT '',
+    mrtd           TEXT NOT NULL DEFAULT '',
+    rtmr0          TEXT NOT NULL DEFAULT '',
+    rtmr1          TEXT NOT NULL DEFAULT '',
+    rtmr2          TEXT NOT NULL DEFAULT '',
+    rtmr3          TEXT NOT NULL DEFAULT '',
+    policy_version TEXT NOT NULL DEFAULT 'v1',
+    registered_at  TEXT NOT NULL
+);
+```
+
+**Backward compatibility:** The static `CONNECTOR_BUNDLE_TEMPLATES_JSON` env var is still supported as a seed mechanism — if set, `enclout serve` loads it into the `connector_bundles` table on first run, then ignores it. This allows existing deployments to migrate without reconfiguring.
+
+### DstackInfo metadata
+
+The `DstackDeriver` also returns `DstackInfo` (app_id, instance_id, app_name, tcb_info) from the dstack `Info()` call. This metadata is stored as a JSON blob in an `info` column on the `connector_bundles` table for diagnostic/audit purposes, but is not part of the attestation verification flow.
 
 ---
 
@@ -249,6 +338,21 @@ CREATE TABLE audit_log (
 );
 CREATE INDEX idx_audit_entity ON audit_log(entity_type, entity_id);
 CREATE INDEX idx_audit_time ON audit_log(created_at);
+
+CREATE TABLE connector_bundles (
+    connector_id   TEXT PRIMARY KEY,
+    ssh_public_key TEXT NOT NULL,
+    quote_hex      TEXT NOT NULL,
+    event_log      TEXT NOT NULL DEFAULT '',
+    mrtd           TEXT NOT NULL DEFAULT '',
+    rtmr0          TEXT NOT NULL DEFAULT '',
+    rtmr1          TEXT NOT NULL DEFAULT '',
+    rtmr2          TEXT NOT NULL DEFAULT '',
+    rtmr3          TEXT NOT NULL DEFAULT '',
+    policy_version TEXT NOT NULL DEFAULT 'v1',
+    info           TEXT NOT NULL DEFAULT '{}',  -- dstack_info JSON blob
+    registered_at  TEXT NOT NULL
+);
 ```
 
 ### Repository interfaces
@@ -266,6 +370,12 @@ type SessionRepository interface {
     Get(ctx context.Context, id string) (access.InstallSession, error)
     Update(ctx context.Context, session access.InstallSession) error
     RedeemToken(ctx context.Context, tokenDigest string) (access.InstallSession, error)
+}
+
+type BundleRepository interface {
+    Register(ctx context.Context, bundle ConnectorBundle) error  // upsert
+    Get(ctx context.Context, connectorID string) (ConnectorBundle, error)
+    List(ctx context.Context) ([]ConnectorBundle, error)
 }
 ```
 
@@ -301,11 +411,17 @@ enclout
 
 ```
 enclout serve [flags]
-  --bind          Listen address (default: 127.0.0.1:8080)
-  --db            SQLite database path (default: ./enclout.db)
-  --config        Config file path (optional)
-  --log-format    "text" or "json" (default: text)
+  --bind              Listen address (default: 127.0.0.1:8080)
+  --db                SQLite database path (default: ./enclout.db)
+  --auth-token        API bearer token (required; env: ENCLOUT_AUTH_TOKEN)
+  --signing-key       Base64 Ed25519 seed for bundle signing (env: ENCLOUT_SIGNING_KEY_B64)
+  --signing-keys-json JSON keyset map {kid: seedB64} for multi-key rotation (env: ENCLOUT_SIGNING_KEYS_JSON)
+  --signing-active-kid Active key ID when using keyset (env: ENCLOUT_SIGNING_ACTIVE_KID)
+  --config            Config file path (optional)
+  --log-format        "text" or "json" (default: text)
 ```
+
+Signing key resolution: `--signing-keys-json` + `--signing-active-kid` for multi-key mode, or `--signing-key` for single-key mode. At least one must be provided. Secrets should come from env vars or config file rather than CLI flags in production.
 
 Graceful shutdown via `signal.NotifyContext` + `server.Shutdown(ctx)`.
 
@@ -313,14 +429,25 @@ Graceful shutdown via `signal.NotifyContext` + `server.Shutdown(ctx)`.
 
 ```
 enclout agent [flags]
-  --server        Control plane URL (required)
-  --device-id     Device ID (required)
-  --username      Local SSH username (required)
-  --token         Bearer token
-  --poll-interval Poll interval (default: 5s)
-  --keys-dir      SSH keys directory (default: ~/.enclout/keys)
-  --log-format    "text" or "json" (default: text)
+  --server              Control plane URL (required; env: ENCLOUT_SERVER)
+  --device-id           Device ID (required; env: ENCLOUT_DEVICE_ID)
+  --username            Local SSH username (required; env: ENCLOUT_USERNAME)
+  --token               Bearer token (env: ENCLOUT_TOKEN)
+  --poll-interval       Poll interval (default: 5s)
+  --keys-dir            SSH keys directory (default: ~/.enclout/keys)
+  --dcap-url            DCAP verifier URL (required; env: ENCLOUT_DCAP_URL)
+  --dcap-token          DCAP verifier auth token (env: ENCLOUT_DCAP_TOKEN)
+  --dcap-timeout        DCAP verifier timeout (default: 10s)
+  --allow-mrtd          Comma-separated MRTD allowlist (env: ENCLOUT_ALLOW_MRTD)
+  --allow-rtmr3         Comma-separated RTMR3 allowlist (env: ENCLOUT_ALLOW_RTMR3)
+  --signing-keys-json   Trusted control-plane signing keyset JSON (env: ENCLOUT_SIGNING_KEYS_JSON)
+  --signing-pubkey      Single trusted control-plane signing public key base64 (env: ENCLOUT_SIGNING_PUBKEY_B64)
+  --signing-cache-ttl   Keyset cache TTL for refresh from server (default: 5m)
+  --log-format          "text" or "json" (default: text)
+  --config              Config file path (optional)
 ```
+
+All existing env vars have flag equivalents. The `enclout install` command writes these into the launchd/systemd service config, so existing deployments that set env vars continue to work — Cobra binds env vars to flags automatically.
 
 Jittered polling (+-20%), exponential backoff on error (max 60s), health file at `~/.enclout/agent.health`.
 
@@ -375,6 +502,41 @@ enclout status [flags]
 
 Flags -> env vars -> config file (`~/.enclout/config.toml` or `./enclout.toml`) -> defaults.
 
+Config file schema (TOML):
+
+```toml
+# ~/.enclout/config.toml
+
+[serve]
+bind = "127.0.0.1:8080"
+db = "./enclout.db"
+auth_token = "bearer-token-here"         # ENCLOUT_AUTH_TOKEN
+signing_key = "base64-seed"              # ENCLOUT_SIGNING_KEY_B64
+# OR for multi-key:
+# signing_keys = '{"v1":"seed1","v2":"seed2"}'  # ENCLOUT_SIGNING_KEYS_JSON
+# signing_active_kid = "v2"                      # ENCLOUT_SIGNING_ACTIVE_KID
+
+[agent]
+server = "https://control-plane.example.com"  # ENCLOUT_SERVER
+device_id = "device-abc"                       # ENCLOUT_DEVICE_ID
+username = "deploy"                            # ENCLOUT_USERNAME
+token = "bearer-token"                         # ENCLOUT_TOKEN
+poll_interval = "5s"
+keys_dir = "~/.enclout/keys"
+dcap_url = "https://dcap.example.com"          # ENCLOUT_DCAP_URL
+dcap_token = ""                                # ENCLOUT_DCAP_TOKEN
+dcap_timeout = "10s"
+allow_mrtd = ["hash1", "hash2"]                # ENCLOUT_ALLOW_MRTD (comma-separated)
+allow_rtmr3 = ["hash1"]                        # ENCLOUT_ALLOW_RTMR3 (comma-separated)
+signing_pubkey = "base64-pubkey"               # ENCLOUT_SIGNING_PUBKEY_B64
+signing_cache_ttl = "5m"
+
+[log]
+format = "text"  # "text" or "json"
+```
+
+Env var names use `ENCLOUT_` prefix (replacing the current mixed prefixes like `CONTROL_PLANE_URL`, `API_AUTH_TOKEN`, etc.). The old env var names are NOT supported — this is a clean break matching the API route rename.
+
 ---
 
 ## MCP Server Layer
@@ -384,7 +546,7 @@ Flags -> env vars -> config file (`~/.enclout/config.toml` or `./enclout.toml`) 
 | Tool | Description | Inputs | Returns |
 |------|-------------|--------|---------|
 | `enclout_connect` | Request SSH access | device_id, connector_id, requester_id, source | request_id, status, message |
-| `enclout_install_start` | Create install session | requester_id, source | session_id, install_url, install_token |
+| `enclout_install_start` | Create install session | requester_id, source | session_id, install_url, install_token, install_commands |
 | `enclout_install_approve` | Approve install session | session_id | session_id, status |
 | `enclout_install_status` | Check install progress | session_id | session_id, status, connector_id, device_id |
 | `enclout_request_status` | Check request progress | request_id | request_id, status, reason_code |
@@ -395,6 +557,8 @@ Flags -> env vars -> config file (`~/.enclout/config.toml` or `./enclout.toml`) 
 MCP server (stdio) -> client.Client (HTTP) -> enclout serve (HTTP API) -> SQLite.
 
 Each tool handler is ~15 lines: validate input, call HTTP client, format response.
+
+The `enclout_install_start` tool returns `install_commands` — platform-specific shell snippets (macOS and Linux) that agent harnesses can present to users. This replaces the install command templates currently embedded in the OpenClaw skill's `user-install-response.md`.
 
 ### Harness consumption
 
@@ -454,7 +618,7 @@ Golden test: same seed as current Node.js test fixtures must produce identical S
 
 ### Route table
 
-Go 1.22+ stdlib mux with path patterns. Replaces manual `strings.HasSuffix` routing.
+Go 1.23 stdlib mux with path patterns. Replaces manual `strings.HasSuffix` routing.
 
 ```
 POST /v1/requests                    Create connection request
@@ -472,15 +636,27 @@ POST /v1/sessions/redeem             Redeem install token
 
 GET  /v1/devices/{deviceID}/pending  List pending requests
 GET  /v1/signing-keys                Public signing keyset
+POST /v1/connectors/register         Register connector identity + attestation
 
 GET  /install                        Install landing page
 GET  /healthz                        Health check
 ```
 
+### New endpoints
+
+- `GET /v1/requests/{id}` — new endpoint used by `enclout status --request-id` and MCP `enclout_request_status`. Returns the full request object. Previously, individual request reads were internal-only (called by the attestation bundle handler). Now exposed for external status polling.
+- `POST /v1/connectors/register` — new endpoint for dynamic connector identity registration. Replaces the static `CONNECTOR_BUNDLE_TEMPLATES_JSON` env var. Called by the TEE connector on startup to register its derived identity and attestation data.
+
 ### Changes from current API
 
-- `/v1/connection-requests` -> `/v1/requests` (shorter)
-- `/v1/install-sessions` -> `/v1/sessions` (shorter)
+**This is a hard breaking change.** All route paths change. There is no backward compatibility period — the old routes (`/v1/connection-requests`, `/v1/install-sessions`, `/v1/openclaw/intents`) are not preserved. This is acceptable because:
+1. The only consumers of these routes are the local-agent and the OpenClaw skill, both of which are being replaced by the refactored binary and MCP server.
+2. No external system calls these endpoints directly — the OpenClaw gateway talks to the skill, not the API.
+
+Specific renames:
+- `/v1/connection-requests` -> `/v1/requests`
+- `/v1/install-sessions` -> `/v1/sessions`
+- `/v1/devices/{deviceID}/pending-requests` -> `/v1/devices/{deviceID}/pending`
 - `/v1/openclaw/intents` removed (harnesses use MCP or CLI)
 - Path parameters via `r.PathValue("id")` (stdlib, no string hacking)
 

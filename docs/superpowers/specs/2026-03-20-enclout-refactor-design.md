@@ -200,7 +200,7 @@ State transitions on the type:
 ```go
 func (s *InstallSession) Approve() error   // requested -> approved
 func (s *InstallSession) Deny() error      // requested -> failed (reason: "Denied")
-func (s *InstallSession) Register(connectorID, deviceID string) error  // requested|approved, sets identity fields
+func (s *InstallSession) Register(connectorID, deviceID string) error  // requested|approved, sets identity fields only (no status change)
 func (s *InstallSession) Complete() error  // approved (with identity) -> installed
 func (s *InstallSession) Fail(reason string) error  // approved -> failed
 func (s *InstallSession) Expire() error    // requested|approved -> failed (reason: "Expired")
@@ -366,7 +366,7 @@ type RequestRepository interface {
 }
 
 type SessionRepository interface {
-    Create(ctx context.Context, session access.InstallSession, tokenDigest string) error
+    Create(ctx context.Context, session access.InstallSession) error  // TokenDigest read from session struct
     Get(ctx context.Context, id string) (access.InstallSession, error)
     Update(ctx context.Context, session access.InstallSession) error
     RedeemToken(ctx context.Context, tokenDigest string) (access.InstallSession, error)
@@ -413,6 +413,7 @@ enclout
 enclout serve [flags]
   --bind              Listen address (default: 127.0.0.1:8080)
   --db                SQLite database path (default: ./enclout.db)
+  --connector-id      Connector ID for TEE identity registration (env: ENCLOUT_CONNECTOR_ID; required if dstack socket is available)
   --auth-token        API bearer token (required; env: ENCLOUT_AUTH_TOKEN)
   --signing-key       Base64 Ed25519 seed for bundle signing (env: ENCLOUT_SIGNING_KEY_B64)
   --signing-keys-json JSON keyset map {kid: seedB64} for multi-key rotation (env: ENCLOUT_SIGNING_KEYS_JSON)
@@ -655,7 +656,12 @@ GET  /healthz                        Health check
 
 Specific renames:
 - `/v1/connection-requests` -> `/v1/requests`
+- `/v1/connection-requests/{id}/local-decision` -> `/v1/requests/{id}/decision`
+- `/v1/connection-requests/{id}/attestation-bundle` -> `/v1/requests/{id}/bundle`
 - `/v1/install-sessions` -> `/v1/sessions`
+- `/v1/install-sessions/{id}/approval` -> `/v1/sessions/{id}/approve` (noun -> verb)
+- `/v1/install-sessions/{id}/registration` -> `/v1/sessions/{id}/register` (noun -> verb)
+- `/v1/install-sessions/redeem` -> `/v1/sessions/redeem`
 - `/v1/devices/{deviceID}/pending-requests` -> `/v1/devices/{deviceID}/pending`
 - `/v1/openclaw/intents` removed (harnesses use MCP or CLI)
 - Path parameters via `r.PathValue("id")` (stdlib, no string hacking)

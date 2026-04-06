@@ -13,8 +13,15 @@ type SSHKeyManager struct {
 }
 
 // NewSSHKeyManager creates a manager that writes authorized_keys files
-// under baseDir/<username>/authorized_keys.
+// under baseDir/<username>/authorized_keys. A leading "~" in baseDir is
+// expanded to the current user's home directory.
 func NewSSHKeyManager(baseDir string) SSHKeyManager {
+	if strings.HasPrefix(baseDir, "~/") {
+		home, err := os.UserHomeDir()
+		if err == nil {
+			baseDir = filepath.Join(home, baseDir[2:])
+		}
+	}
 	return SSHKeyManager{baseDir: baseDir}
 }
 

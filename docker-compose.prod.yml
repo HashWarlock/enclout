@@ -1,6 +1,6 @@
 services:
   enclout:
-    build: .
+    image: hashwarlock/enclout:${IMAGE_TAG:-latest}
     ports:
       - "8080:8080"
     environment:
@@ -13,7 +13,6 @@ services:
       - DSTACK_GATEWAY_DOMAIN=${DSTACK_GATEWAY_DOMAIN}
     volumes:
       - enclout-data:/data
-      # Mount the dstack Unix socket so the SDK can reach the TEE runtime inside a CVM.
       - /var/run/dstack.sock:/var/run/dstack.sock
 
 volumes:

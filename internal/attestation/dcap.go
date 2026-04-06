@@ -22,16 +22,36 @@ type HTTPDCAPVerifier struct {
 }
 
 type dcapVerifyRequest struct {
+	// "hex" is the field name used by Phala Cloud's attestation API.
+	// Some self-hosted verifiers use "quote_hex"; we send both so either
+	// server can read it without extra configuration.
+	Hex      string `json:"hex"`
 	QuoteHex string `json:"quote_hex"`
 }
 
+// dcapVerifyResponse covers both the flat format used by self-hosted verifiers
+// and the nested format returned by Phala Cloud
+// (https://cloud-api.phala.com/api/v1/attestations/verify).
 type dcapVerifyResponse struct {
+	// Flat format fields.
 	QuoteValid      bool                `json:"quote_valid"`
 	QEIdentityValid bool                `json:"qe_identity_valid"`
 	TCBValid        bool                `json:"tcb_valid"`
 	ReportDataHex   string              `json:"report_data_hex"`
 	ReportData      string              `json:"report_data"`
 	NestedResult    *dcapVerifyResponse `json:"result"`
+
+	// Phala Cloud nested format: {"quote": {"verified": true, "body": {"reportdata": "0x..."}}}
+	Quote *phalaQuoteResult `json:"quote"`
+}
+
+type phalaQuoteResult struct {
+	Verified bool            `json:"verified"`
+	Body     *phalaQuoteBody `json:"body"`
+}
+
+type phalaQuoteBody struct {
+	ReportData string `json:"reportdata"`
 }
 
 // NewHTTPDCAPVerifier creates a verifier that POSTs quote data to the given
@@ -60,7 +80,7 @@ func (v HTTPDCAPVerifier) Verify(ctx context.Context, quoteHex string) (DCAPResu
 		return DCAPResult{}, fmt.Errorf("missing quote_hex")
 	}
 
-	rawBody, err := json.Marshal(dcapVerifyRequest{QuoteHex: quoteHex})
+	rawBody, err := json.Marshal(dcapVerifyRequest{Hex: quoteHex, QuoteHex: quoteHex})
 	if err != nil {
 		return DCAPResult{}, err
 	}
@@ -90,6 +110,25 @@ func (v HTTPDCAPVerifier) Verify(ctx context.Context, quoteHex string) (DCAPResu
 		return DCAPResult{}, err
 	}
 
+	// Phala Cloud nested format: {"quote": {"verified": true, "body": {"reportdata": "0x..."}}}
+	if decoded.Quote != nil {
+		var reportDataHex string
+		if decoded.Quote.Body != nil {
+			reportDataHex = decoded.Quote.Body.ReportData
+		}
+		reportData, err := parseReportDataHex(reportDataHex)
+		if err != nil {
+			return DCAPResult{}, fmt.Errorf("parse report data: %w", err)
+		}
+		return DCAPResult{
+			QuoteValid:      decoded.Quote.Verified,
+			QEIdentityValid: decoded.Quote.Verified,
+			TCBValid:        decoded.Quote.Verified,
+			ReportData:      reportData,
+		}, nil
+	}
+
+	// Flat format (self-hosted verifiers).
 	src := decoded
 	if decoded.NestedResult != nil {
 		src = *decoded.NestedResult

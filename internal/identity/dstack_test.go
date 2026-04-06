@@ -14,7 +14,8 @@ import (
 	"testing"
 )
 
-// fakeDstackHandler simulates the dstack TEE runtime HTTP API.
+// fakeDstackHandler simulates the dstack TEE runtime HTTP API as expected by
+// the official dstack Go SDK (github.com/Dstack-TEE/dstack/sdk/go/dstack).
 func fakeDstackHandler(t *testing.T) http.HandlerFunc {
 	t.Helper()
 
@@ -28,53 +29,41 @@ func fakeDstackHandler(t *testing.T) http.HandlerFunc {
 			return
 		}
 
-		body, err := io.ReadAll(r.Body)
-		if err != nil {
-			http.Error(w, "read body", http.StatusInternalServerError)
-			return
-		}
+		body, _ := io.ReadAll(r.Body)
 		defer r.Body.Close()
+		_ = body
 
 		w.Header().Set("Content-Type", "application/json")
 
 		switch r.URL.Path {
+		case "/Version":
+			// Required by the SDK before any non-secp256k1 algorithm (e.g. ed25519).
+			json.NewEncoder(w).Encode(map[string]any{
+				"version": "0.5.7",
+				"rev":     "test",
+			})
+
 		case "/GetKey":
-			var req struct {
-				Path    string `json:"path"`
-				Purpose string `json:"purpose"`
-			}
-			if err := json.Unmarshal(body, &req); err != nil {
-				http.Error(w, "bad json", http.StatusBadRequest)
-				return
-			}
-			resp := map[string]any{
+			json.NewEncoder(w).Encode(map[string]any{
 				"key":             seedHex,
 				"signature_chain": []string{},
-			}
-			json.NewEncoder(w).Encode(resp)
+			})
 
 		case "/GetQuote":
-			var req struct {
-				ReportData string `json:"report_data"`
-			}
-			if err := json.Unmarshal(body, &req); err != nil {
-				http.Error(w, "bad json", http.StatusBadRequest)
-				return
-			}
-			resp := map[string]any{
-				"quote":     "deadbeef",
-				"event_log": "[]",
-			}
-			json.NewEncoder(w).Encode(resp)
+			json.NewEncoder(w).Encode(map[string]any{
+				"quote":       "deadbeef",
+				"event_log":   "[]",
+				"report_data": "",
+				"vm_config":   "",
+			})
 
 		case "/Info":
-			resp := map[string]any{
+			json.NewEncoder(w).Encode(map[string]any{
 				"app_id":      "test-app-id",
 				"instance_id": "test-instance-id",
 				"app_name":    "test-app",
-				"tcb_info":    `{"mrtd":"abc"}`,
-			}
-			json.NewEncoder(w).Encode(resp)
+				"tcb_info":    `{"mrtd":"abc","rtmr0":"","rtmr1":"","rtmr2":"","rtmr3":""}`,
+			})
 
 		default:
 			http.Error(w, "not found: "+r.URL.Path, http.StatusNotFound)
@@ -82,101 +71,58 @@ func fakeDstackHandler(t *testing.T) http.HandlerFunc {
 	}
 }
 
-func TestDstackClient_GetKey(t *testing.T) {
+// startFakeDstack starts a fake dstack server, sets DSTACK_SIMULATOR_ENDPOINT,
+// and returns a cleanup function.
+func startFakeDstack(t *testing.T) {
+	t.Helper()
 	srv := httptest.NewServer(fakeDstackHandler(t))
-	defer srv.Close()
-
-	client := NewDstackClient(srv.URL)
-	key, err := client.GetKey(context.Background(), "ssh/connector/v1", "ed25519")
-	if err != nil {
-		t.Fatalf("GetKey failed: %v", err)
-	}
-
-	expected := bytes.Repeat([]byte{0x42}, 32)
-	if !bytes.Equal(key, expected) {
-		t.Errorf("expected key %x, got %x", expected, key)
-	}
-}
-
-func TestDstackClient_GetQuote(t *testing.T) {
-	srv := httptest.NewServer(fakeDstackHandler(t))
-	defer srv.Close()
-
-	client := NewDstackClient(srv.URL)
-	quote, eventLog, err := client.GetQuote(context.Background(), "test-data")
-	if err != nil {
-		t.Fatalf("GetQuote failed: %v", err)
-	}
-
-	if quote != "deadbeef" {
-		t.Errorf("expected quote 'deadbeef', got %q", quote)
-	}
-	if eventLog != "[]" {
-		t.Errorf("expected event_log '[]', got %q", eventLog)
-	}
-}
-
-func TestDstackClient_Info(t *testing.T) {
-	srv := httptest.NewServer(fakeDstackHandler(t))
-	defer srv.Close()
-
-	client := NewDstackClient(srv.URL)
-	info, err := client.Info(context.Background())
-	if err != nil {
-		t.Fatalf("Info failed: %v", err)
-	}
-
-	if info.AppID != "test-app-id" {
-		t.Errorf("expected app_id 'test-app-id', got %q", info.AppID)
-	}
-	if info.InstanceID != "test-instance-id" {
-		t.Errorf("expected instance_id 'test-instance-id', got %q", info.InstanceID)
-	}
-	if info.AppName != "test-app" {
-		t.Errorf("expected app_name 'test-app', got %q", info.AppName)
-	}
+	t.Cleanup(srv.Close)
+	t.Setenv("DSTACK_SIMULATOR_ENDPOINT", srv.URL)
 }
 
 func TestDstackDeriver_DeriveIdentity(t *testing.T) {
-	srv := httptest.NewServer(fakeDstackHandler(t))
-	defer srv.Close()
+	startFakeDstack(t)
 
-	client := NewDstackClient(srv.URL)
-	deriver := NewDstackDeriver(client)
-
-	identity, attestation, err := deriver.DeriveIdentity(context.Background(), "test-connector")
+	deriver := NewDstackDeriver()
+	id, att, err := deriver.DeriveIdentity(context.Background(), "test-connector")
 	if err != nil {
 		t.Fatalf("DeriveIdentity failed: %v", err)
 	}
 
-	if identity.ConnectorID != "test-connector" {
-		t.Errorf("expected connector_id 'test-connector', got %q", identity.ConnectorID)
+	if id.ConnectorID != "test-connector" {
+		t.Errorf("expected connector_id 'test-connector', got %q", id.ConnectorID)
 	}
 
-	if !strings.HasPrefix(identity.SSHPublicKey, "ssh-ed25519 ") {
-		t.Errorf("expected ssh-ed25519 prefix, got %q", identity.SSHPublicKey)
+	if !strings.HasPrefix(id.SSHPublicKey, "ssh-ed25519 ") {
+		t.Errorf("expected ssh-ed25519 prefix, got %q", id.SSHPublicKey)
 	}
 
-	if identity.PublicKeyHex == "" {
+	if id.PublicKeyHex == "" {
 		t.Error("expected non-empty PublicKeyHex")
 	}
 
-	if len(identity.FingerprintSHA256) != 64 {
-		t.Errorf("expected 64-char fingerprint, got %d chars", len(identity.FingerprintSHA256))
+	if len(id.FingerprintSHA256) != 64 {
+		t.Errorf("expected 64-char fingerprint, got %d chars", len(id.FingerprintSHA256))
 	}
 
-	if attestation.QuoteHex != "deadbeef" {
-		t.Errorf("expected quote 'deadbeef', got %q", attestation.QuoteHex)
+	if att.QuoteHex != "deadbeef" {
+		t.Errorf("expected quote 'deadbeef', got %q", att.QuoteHex)
+	}
+
+	if att.MRTD != "abc" {
+		t.Errorf("expected MRTD 'abc', got %q", att.MRTD)
+	}
+
+	// ReportDataExpectedSHA256 must be the SHA256 of the SSH public key (hex).
+	if len(att.ReportDataExpectedSHA256) != 64 {
+		t.Errorf("expected 64-char report data hash, got %d", len(att.ReportDataExpectedSHA256))
 	}
 }
 
 func TestDstackDeriver_EmptyConnectorID(t *testing.T) {
-	srv := httptest.NewServer(fakeDstackHandler(t))
-	defer srv.Close()
+	startFakeDstack(t)
 
-	client := NewDstackClient(srv.URL)
-	deriver := NewDstackDeriver(client)
-
+	deriver := NewDstackDeriver()
 	_, _, err := deriver.DeriveIdentity(context.Background(), "")
 	if err == nil {
 		t.Error("expected error for empty connectorID")
@@ -184,7 +130,6 @@ func TestDstackDeriver_EmptyConnectorID(t *testing.T) {
 }
 
 func TestEnvDeriver_DeriveIdentity(t *testing.T) {
-	// Set up environment for the test.
 	seed := bytes.Repeat([]byte{0x42}, ed25519.SeedSize)
 	seedB64 := "QkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkJCQkI=" // base64 of 32 x 0x42
 
@@ -194,35 +139,33 @@ func TestEnvDeriver_DeriveIdentity(t *testing.T) {
 	t.Setenv("TEE_POLICY_VERSION", "v1")
 
 	deriver := &EnvDeriver{}
-	identity, attestation, err := deriver.DeriveIdentity(context.Background(), "env-connector")
+	id, att, err := deriver.DeriveIdentity(context.Background(), "env-connector")
 	if err != nil {
 		t.Fatalf("DeriveIdentity failed: %v", err)
 	}
 
-	if identity.ConnectorID != "env-connector" {
-		t.Errorf("expected connector_id 'env-connector', got %q", identity.ConnectorID)
+	if id.ConnectorID != "env-connector" {
+		t.Errorf("expected connector_id 'env-connector', got %q", id.ConnectorID)
 	}
 
-	// Verify the key matches what we expect from this seed.
 	pub, _, _ := DeriveEd25519(seed)
 	expectedSSH, _ := SSHPublicKeyString(pub)
-	if identity.SSHPublicKey != expectedSSH {
-		t.Errorf("SSH key mismatch:\n  got:    %s\n  expect: %s", identity.SSHPublicKey, expectedSSH)
+	if id.SSHPublicKey != expectedSSH {
+		t.Errorf("SSH key mismatch:\n  got:    %s\n  expect: %s", id.SSHPublicKey, expectedSSH)
 	}
 
-	if attestation.QuoteHex != "cafebabe" {
-		t.Errorf("expected quote 'cafebabe', got %q", attestation.QuoteHex)
+	if att.QuoteHex != "cafebabe" {
+		t.Errorf("expected quote 'cafebabe', got %q", att.QuoteHex)
 	}
-	if attestation.MRTD != "test-mrtd" {
-		t.Errorf("expected MRTD 'test-mrtd', got %q", attestation.MRTD)
+	if att.MRTD != "test-mrtd" {
+		t.Errorf("expected MRTD 'test-mrtd', got %q", att.MRTD)
 	}
-	if attestation.PolicyVersion != "v1" {
-		t.Errorf("expected PolicyVersion 'v1', got %q", attestation.PolicyVersion)
+	if att.PolicyVersion != "v1" {
+		t.Errorf("expected PolicyVersion 'v1', got %q", att.PolicyVersion)
 	}
 }
 
 func TestEnvDeriver_MissingSeed(t *testing.T) {
-	// Ensure TEE_SEED_B64 is not set.
 	os.Unsetenv("TEE_SEED_B64")
 
 	deriver := &EnvDeriver{}

@@ -170,17 +170,13 @@ func newLogger(format string) *slog.Logger {
 }
 
 // registerConnectorBundle derives a TEE identity and registers the connector
-// bundle in the local database on startup.
+// bundle in the local database on startup. The dstack SDK reads
+// DSTACK_SIMULATOR_ENDPOINT automatically; in a CVM it falls back to
+// /var/run/dstack.sock.
 func registerConnectorBundle(ctx context.Context, connectorID string, bundles *store.BundleRepository, logger *slog.Logger) error {
-	endpoint := os.Getenv("DSTACK_SIMULATOR_ENDPOINT")
-	if endpoint == "" {
-		endpoint = "http://localhost:8090"
-	}
+	deriver := identity.NewDstackDeriver()
 
-	client := identity.NewDstackClient(endpoint)
-	deriver := identity.NewDstackDeriver(client)
-
-	logger.Info("deriving TEE identity", "connector_id", connectorID, "dstack_endpoint", endpoint)
+	logger.Info("deriving TEE identity", "connector_id", connectorID)
 
 	id, att, err := deriver.DeriveIdentity(ctx, connectorID)
 	if err != nil {

@@ -8,9 +8,13 @@ services:
       - ENCLOUT_SIGNING_KEY_B64=${ENCLOUT_SIGNING_KEY_B64}
       - ENCLOUT_CONNECTOR_ID=${ENCLOUT_CONNECTOR_ID:-}
       - ENCLOUT_LOG_FORMAT=json
-      - DSTACK_SIMULATOR_ENDPOINT=http://localhost:8090
+      # DSTACK_SIMULATOR_ENDPOINT is used for local dev only.
+      # In a Phala Cloud CVM the SDK connects via /var/run/dstack.sock automatically.
+      - DSTACK_SIMULATOR_ENDPOINT=${DSTACK_SIMULATOR_ENDPOINT:-}
     volumes:
       - enclout-data:/data
+      # Mount the dstack Unix socket so the SDK can reach the TEE runtime inside a CVM.
+      - /var/run/dstack.sock:/var/run/dstack.sock
 
 volumes:
   enclout-data:

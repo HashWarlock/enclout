@@ -102,6 +102,15 @@ func serveCmd() *cobra.Command {
 			// Start expiration goroutine.
 			srv.StartExpiration(ctx)
 
+			// Log the public URL when running inside a Phala Cloud CVM.
+			// DSTACK_APP_ID and DSTACK_GATEWAY_DOMAIN are injected automatically by the platform.
+			// Traffic to port 8080 is routed via <app-id>-8080.<gateway-domain>.
+			if appID := os.Getenv("DSTACK_APP_ID"); appID != "" {
+				gatewayDomain := os.Getenv("DSTACK_GATEWAY_DOMAIN")
+				publicURL := "https://" + appID + "-8080." + gatewayDomain
+				logger.Info("public URL", "url", publicURL)
+			}
+
 			// Start server in a goroutine.
 			errCh := make(chan error, 1)
 			go func() {

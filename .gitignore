@@ -1,3 +1,4 @@
 services/connector-tee/node_modules/
 
 .DS_Store
+.worktrees/

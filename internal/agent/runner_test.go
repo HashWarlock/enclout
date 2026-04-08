@@ -95,13 +95,24 @@ func (f *fakeTrustedKeys) TrustedKeys(_ context.Context) (map[string]string, err
 	return out, nil
 }
 
+type fakeAuditSink struct {
+	err   error
+	calls int
+}
+
+func (f *fakeAuditSink) Ready(_ context.Context) error {
+	f.calls++
+	return f.err
+}
+
 func TestRunner_Process_FullFlow(t *testing.T) {
 	bundle, publicKeyB64 := testSignedBundle(t, false)
 	apiClient := &fakeRequestClient{bundle: bundle}
 	keys := &fakeKeyInstaller{}
 	verifier := &fakeBundleVerifier{decision: attestation.Decision{Trusted: true}}
 	signingKeys := &fakeTrustedKeys{keys: map[string]string{"v1": publicKeyB64}}
-	r := NewRunner(apiClient, fakeDecisionSource{approved: true}, verifier, keys, signingKeys, nil)
+	auditSink := &fakeAuditSink{}
+	r := NewRunnerWithAuditSink(apiClient, fakeDecisionSource{approved: true}, verifier, keys, signingKeys, auditSink, nil)
 
 	err := r.Process(context.Background(), Request{
 		ID:          "req_1",
@@ -128,6 +139,9 @@ func TestRunner_Process_FullFlow(t *testing.T) {
 	}
 	if apiClient.resultStatus != "connected" {
 		t.Fatalf("expected connected result, got %q", apiClient.resultStatus)
+	}
+	if auditSink.calls != 1 {
+		t.Fatalf("expected audit sink readiness check once, got %d", auditSink.calls)
 	}
 }
 
@@ -210,7 +224,8 @@ func TestRunner_Process_UsesConfiguredUsername(t *testing.T) {
 	keys := NewSSHKeyManager(keysDir)
 	verifier := &fakeBundleVerifier{decision: attestation.Decision{Trusted: true}}
 	signingKeys := &fakeTrustedKeys{keys: map[string]string{"v1": publicKeyB64}}
-	r := NewRunnerWithUsername(apiClient, fakeDecisionSource{approved: true}, verifier, keys, signingKeys, "alice", nil)
+	auditSink := &fakeAuditSink{}
+	r := NewRunnerWithUsernameAndAuditSink(apiClient, fakeDecisionSource{approved: true}, verifier, keys, signingKeys, "alice", auditSink, nil)
 
 	err := r.Process(context.Background(), Request{
 		ID:          "req_1",
@@ -233,6 +248,46 @@ func TestRunner_Process_UsesConfiguredUsername(t *testing.T) {
 	unexpectedPath := filepath.Join(keysDir, "device-123", "authorized_keys")
 	if _, err := os.Stat(unexpectedPath); !os.IsNotExist(err) {
 		t.Fatalf("expected no authorized_keys at device-id path %q, got err=%v", unexpectedPath, err)
+	}
+	if auditSink.calls != 1 {
+		t.Fatalf("expected audit sink readiness check once, got %d", auditSink.calls)
+	}
+}
+
+func TestRunner_Process_AuditSinkUnhealthy(t *testing.T) {
+	bundle, publicKeyB64 := testSignedBundle(t, false)
+	apiClient := &fakeRequestClient{bundle: bundle}
+	keys := &fakeKeyInstaller{}
+	verifier := &fakeBundleVerifier{decision: attestation.Decision{Trusted: true}}
+	signingKeys := &fakeTrustedKeys{keys: map[string]string{"v1": publicKeyB64}}
+	auditSink := &fakeAuditSink{err: errors.New("audit sink unavailable")}
+	r := NewRunnerWithAuditSink(apiClient, fakeDecisionSource{approved: true}, verifier, keys, signingKeys, auditSink, nil)
+
+	err := r.Process(context.Background(), Request{
+		ID:          "req_1",
+		ConnectorID: "conn_1",
+		LocalUser:   "alice",
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if apiClient.resultStatus != "verification_failed" {
+		t.Fatalf("expected verification_failed status, got %q", apiClient.resultStatus)
+	}
+	if apiClient.resultReason != auditSinkNotReadyReason {
+		t.Fatalf("expected audit sink failure reason, got %q", apiClient.resultReason)
+	}
+	if !errors.Is(err, auditSink.err) {
+		t.Fatalf("expected audit sink error, got %v", err)
+	}
+	if auditSink.calls != 1 {
+		t.Fatalf("expected audit sink readiness check once, got %d", auditSink.calls)
+	}
+	if keys.installed == false {
+		t.Fatalf("expected ssh key installation to complete before audit gate")
+	}
+	if apiClient.resultStatus == "connected" {
+		t.Fatalf("expected not to report connected")
 	}
 }
 

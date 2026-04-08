@@ -13,6 +13,8 @@ import (
 // ErrUserDenied is returned when the user denies local approval.
 var ErrUserDenied = errors.New("user denied local approval")
 
+const auditSinkNotReadyReason = "AuditSinkNotReady"
+
 // SignedBundle is the server's response containing a signed attestation bundle.
 // PayloadRaw is the exact bytes that were signed; Payload is the parsed map.
 type SignedBundle struct {
@@ -45,6 +47,15 @@ type TrustedKeySource interface {
 	TrustedKeys(ctx context.Context) (map[string]string, error)
 }
 
+// AuditSink reports whether audit logging is ready to accept new events.
+type AuditSink interface {
+	Ready(ctx context.Context) error
+}
+
+type noopAuditSink struct{}
+
+func (noopAuditSink) Ready(context.Context) error { return nil }
+
 // Request describes a pending connection request to be processed.
 type Request struct {
 	ID          string
@@ -60,6 +71,7 @@ type Runner struct {
 	verifier     BundleVerifier
 	keyInstaller KeyInstaller
 	trustedKeys  TrustedKeySource
+	auditSink    AuditSink
 	installUser  string
 	logger       *slog.Logger
 }
@@ -73,7 +85,7 @@ func NewRunner(
 	trustedKeys TrustedKeySource,
 	logger *slog.Logger,
 ) *Runner {
-	return newRunner(client, prompter, verifier, keyInstaller, trustedKeys, "", logger)
+	return newRunner(client, prompter, verifier, keyInstaller, trustedKeys, "", noopAuditSink{}, logger)
 }
 
 // NewRunnerWithUsername creates a Runner that always installs keys for the
@@ -87,7 +99,36 @@ func NewRunnerWithUsername(
 	username string,
 	logger *slog.Logger,
 ) *Runner {
-	return newRunner(client, prompter, verifier, keyInstaller, trustedKeys, username, logger)
+	return newRunner(client, prompter, verifier, keyInstaller, trustedKeys, username, noopAuditSink{}, logger)
+}
+
+// NewRunnerWithAuditSink creates a Runner that checks the audit sink health
+// gate before reporting a connected result.
+func NewRunnerWithAuditSink(
+	client RequestClient,
+	prompter DecisionSource,
+	verifier BundleVerifier,
+	keyInstaller KeyInstaller,
+	trustedKeys TrustedKeySource,
+	auditSink AuditSink,
+	logger *slog.Logger,
+) *Runner {
+	return newRunner(client, prompter, verifier, keyInstaller, trustedKeys, "", auditSink, logger)
+}
+
+// NewRunnerWithUsernameAndAuditSink creates a Runner that installs keys for a
+// fixed username and checks the audit sink health gate before connecting.
+func NewRunnerWithUsernameAndAuditSink(
+	client RequestClient,
+	prompter DecisionSource,
+	verifier BundleVerifier,
+	keyInstaller KeyInstaller,
+	trustedKeys TrustedKeySource,
+	username string,
+	auditSink AuditSink,
+	logger *slog.Logger,
+) *Runner {
+	return newRunner(client, prompter, verifier, keyInstaller, trustedKeys, username, auditSink, logger)
 }
 
 func newRunner(
@@ -97,10 +138,14 @@ func newRunner(
 	keyInstaller KeyInstaller,
 	trustedKeys TrustedKeySource,
 	username string,
+	auditSink AuditSink,
 	logger *slog.Logger,
 ) *Runner {
 	if logger == nil {
 		logger = slog.Default()
+	}
+	if auditSink == nil {
+		auditSink = noopAuditSink{}
 	}
 	return &Runner{
 		client:       client,
@@ -108,6 +153,7 @@ func newRunner(
 		verifier:     verifier,
 		keyInstaller: keyInstaller,
 		trustedKeys:  trustedKeys,
+		auditSink:    auditSink,
 		installUser:  username,
 		logger:       logger,
 	}
@@ -185,6 +231,11 @@ func (r *Runner) Process(ctx context.Context, req Request) error {
 	if err := r.keyInstaller.Install(username, bundle.SSHPublicKey); err != nil {
 		_ = r.client.PostResult(ctx, req.ID, "verification_failed", "TransportFailure")
 		return err
+	}
+
+	if err := r.auditSink.Ready(ctx); err != nil {
+		_ = r.client.PostResult(ctx, req.ID, "verification_failed", auditSinkNotReadyReason)
+		return fmt.Errorf("audit sink readiness check failed: %w", err)
 	}
 
 	return r.client.PostResult(ctx, req.ID, "connected", "")

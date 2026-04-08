@@ -1,6 +1,7 @@
 package config_test
 
 import (
+	"path/filepath"
 	"testing"
 
 	"enclout/internal/config"
@@ -109,5 +110,15 @@ func TestAgentConfig_Validate_Valid(t *testing.T) {
 	c.DCAPUrl = "http://dcap"
 	if err := c.Validate(); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestDefaultAgentConfig_SetsAuditDir(t *testing.T) {
+	t.Setenv("HOME", "/home/tester")
+
+	c := config.DefaultAgentConfig()
+	want := filepath.Join("/home/tester", ".enclout", "audit")
+	if c.AuditDir != want {
+		t.Fatalf("expected audit dir %q, got %q", want, c.AuditDir)
 	}
 }

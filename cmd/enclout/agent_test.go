@@ -101,6 +101,7 @@ func TestLoadAgentConfig_AppliesEnvAndParsesAllowLists(t *testing.T) {
 	t.Setenv("ENCLOUT_DEVICE_ID", "device-1")
 	t.Setenv("ENCLOUT_USERNAME", "deploy")
 	t.Setenv("ENCLOUT_DCAP_URL", "https://dcap.example")
+	t.Setenv("ENCLOUT_AUDIT_DIR", "/var/tmp/enclout-audit")
 	t.Setenv("ENCLOUT_ALLOW_MRTD", " mrtd-a , , mrtd-b ")
 	t.Setenv("ENCLOUT_ALLOW_RTMR3", " rtmr3-a,rtmr3-b ")
 
@@ -109,6 +110,7 @@ func TestLoadAgentConfig_AppliesEnvAndParsesAllowLists(t *testing.T) {
 		"server":      "ENCLOUT_SERVER",
 		"device-id":   "ENCLOUT_DEVICE_ID",
 		"username":    "ENCLOUT_USERNAME",
+		"audit-dir":   "ENCLOUT_AUDIT_DIR",
 		"dcap-url":    "ENCLOUT_DCAP_URL",
 		"allow-mrtd":  "ENCLOUT_ALLOW_MRTD",
 		"allow-rtmr3": "ENCLOUT_ALLOW_RTMR3",
@@ -131,6 +133,9 @@ func TestLoadAgentConfig_AppliesEnvAndParsesAllowLists(t *testing.T) {
 	}
 	if cfg.DCAPUrl != "https://dcap.example" {
 		t.Fatalf("expected DCAP URL from env, got %q", cfg.DCAPUrl)
+	}
+	if cfg.AuditDir != "/var/tmp/enclout-audit" {
+		t.Fatalf("expected audit dir from env, got %q", cfg.AuditDir)
 	}
 
 	wantMRTD := []string{"mrtd-a", "mrtd-b"}

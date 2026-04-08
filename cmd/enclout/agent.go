@@ -37,6 +37,7 @@ func agentCmd() *cobra.Command {
 				"token":         "ENCLOUT_TOKEN",
 				"poll-interval": "ENCLOUT_POLL_INTERVAL",
 				"keys-dir":      "ENCLOUT_KEYS_DIR",
+				"audit-dir":     "ENCLOUT_AUDIT_DIR",
 				"dcap-url":      "ENCLOUT_DCAP_URL",
 				"dcap-token":    "ENCLOUT_DCAP_TOKEN",
 				"dcap-timeout":  "ENCLOUT_DCAP_TIMEOUT",
@@ -85,7 +86,7 @@ func agentCmd() *cobra.Command {
 			keysetSource := agent.NewKeysetSource(apiClient, nil, cfg.SigningCacheTTL)
 
 			// Create runner with all dependencies.
-			auditSink := filesystemAuditSink{dir: cfg.KeysDir}
+			auditSink := filesystemAuditSink{dir: cfg.AuditDir}
 			runner := newAgentRunner(adapter, prompter, verifier, keyManager, keysetSource, cfg.Username, logger, auditSink)
 
 			// Create daemon.
@@ -106,6 +107,7 @@ func agentCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.Token, "token", cfg.Token, "Bearer auth token")
 	cmd.Flags().DurationVar(&cfg.PollInterval, "poll-interval", cfg.PollInterval, "Poll interval")
 	cmd.Flags().StringVar(&cfg.KeysDir, "keys-dir", cfg.KeysDir, "SSH keys directory")
+	cmd.Flags().StringVar(&cfg.AuditDir, "audit-dir", cfg.AuditDir, "Audit sink directory")
 	cmd.Flags().StringVar(&cfg.DCAPUrl, "dcap-url", cfg.DCAPUrl, "DCAP verifier URL (required)")
 	cmd.Flags().StringVar(&cfg.DCAPToken, "dcap-token", cfg.DCAPToken, "DCAP verifier token")
 	cmd.Flags().DurationVar(&cfg.DCAPTimeout, "dcap-timeout", cfg.DCAPTimeout, "DCAP timeout")
@@ -175,6 +177,10 @@ func loadAgentConfig(cmd *cobra.Command, cfg *config.AgentConfig) error {
 		return err
 	}
 	cfg.KeysDir, err = cmd.Flags().GetString("keys-dir")
+	if err != nil {
+		return err
+	}
+	cfg.AuditDir, err = cmd.Flags().GetString("audit-dir")
 	if err != nil {
 		return err
 	}

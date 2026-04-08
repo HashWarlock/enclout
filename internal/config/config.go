@@ -2,6 +2,8 @@ package config
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -34,6 +36,7 @@ type AgentConfig struct {
 	Token            string
 	PollInterval     time.Duration
 	KeysDir          string
+	AuditDir         string
 	DCAPUrl          string
 	DCAPToken        string
 	DCAPTimeout      time.Duration
@@ -63,13 +66,26 @@ func (c AgentConfig) Validate() error {
 
 // DefaultAgentConfig returns an AgentConfig with sensible defaults filled in.
 func DefaultAgentConfig() AgentConfig {
+	auditDir, err := defaultAgentAuditDir()
+	if err != nil {
+		auditDir = "~/.enclout/audit"
+	}
 	return AgentConfig{
 		PollInterval:    5 * time.Second,
 		KeysDir:         "~/.enclout/keys",
+		AuditDir:        auditDir,
 		DCAPTimeout:     10 * time.Second,
 		SigningCacheTTL: 5 * time.Minute,
 		LogFormat:       "text",
 	}
+}
+
+func defaultAgentAuditDir() (string, error) {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return "", err
+	}
+	return filepath.Join(home, ".enclout", "audit"), nil
 }
 
 // DefaultServeConfig returns a ServeConfig with sensible defaults filled in.

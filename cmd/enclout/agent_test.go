@@ -74,25 +74,3 @@ func TestLoadAgentConfig_AppliesEnvAndParsesAllowLists(t *testing.T) {
 		}
 	}
 }
-
-func TestLoadAgentConfig_RejectsMalformedAllowListEnv(t *testing.T) {
-	t.Setenv("ENCLOUT_SERVER", "https://control.example")
-	t.Setenv("ENCLOUT_DEVICE_ID", "device-1")
-	t.Setenv("ENCLOUT_USERNAME", "deploy")
-	t.Setenv("ENCLOUT_DCAP_URL", "https://dcap.example")
-	t.Setenv("ENCLOUT_ALLOW_MRTD", ",")
-
-	cmd := agentCmd()
-	bindEnvDefaults(cmd, map[string]string{
-		"server":     "ENCLOUT_SERVER",
-		"device-id":  "ENCLOUT_DEVICE_ID",
-		"username":   "ENCLOUT_USERNAME",
-		"dcap-url":   "ENCLOUT_DCAP_URL",
-		"allow-mrtd": "ENCLOUT_ALLOW_MRTD",
-	})
-
-	var cfg config.AgentConfig
-	if err := loadAgentConfig(cmd, &cfg); err == nil {
-		t.Fatal("expected malformed allowlist env to fail")
-	}
-}

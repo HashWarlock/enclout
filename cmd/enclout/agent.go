@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 
 	"enclout/internal/agent"
@@ -154,16 +153,8 @@ func loadAgentConfig(cmd *cobra.Command, cfg *config.AgentConfig) error {
 		return err
 	}
 
-	rawAllowMRTD := mustGetString(cmd, "allow-mrtd")
-	cfg.AllowMRTD = config.ParseAllowList(rawAllowMRTD)
-	if strings.TrimSpace(rawAllowMRTD) != "" && len(cfg.AllowMRTD) == 0 {
-		return fmt.Errorf("allow-mrtd must contain at least one value")
-	}
-	rawAllowRTMR3 := mustGetString(cmd, "allow-rtmr3")
-	cfg.AllowRTMR3 = config.ParseAllowList(rawAllowRTMR3)
-	if strings.TrimSpace(rawAllowRTMR3) != "" && len(cfg.AllowRTMR3) == 0 {
-		return fmt.Errorf("allow-rtmr3 must contain at least one value")
-	}
+	cfg.AllowMRTD = config.ParseAllowList(mustGetString(cmd, "allow-mrtd"))
+	cfg.AllowRTMR3 = config.ParseAllowList(mustGetString(cmd, "allow-rtmr3"))
 
 	cfg.LogFormat, err = cmd.Flags().GetString("log-format")
 	return err

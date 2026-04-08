@@ -7,6 +7,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"enclout/internal/attestation"
@@ -72,17 +74,6 @@ type fakeKeyInstaller struct {
 
 func (k *fakeKeyInstaller) Install(_ string, _ string) error {
 	k.installed = true
-	return nil
-}
-
-type recordingKeyInstaller struct {
-	username string
-	pubKey   string
-}
-
-func (k *recordingKeyInstaller) Install(username string, pubKey string) error {
-	k.username = username
-	k.pubKey = pubKey
 	return nil
 }
 
@@ -215,7 +206,8 @@ func TestRunner_Process_InvalidSignature(t *testing.T) {
 func TestRunner_Process_UsesConfiguredUsername(t *testing.T) {
 	bundle, publicKeyB64 := testSignedBundle(t, false)
 	apiClient := &fakeRequestClient{bundle: bundle}
-	keys := &recordingKeyInstaller{}
+	keysDir := t.TempDir()
+	keys := NewSSHKeyManager(keysDir)
 	verifier := &fakeBundleVerifier{decision: attestation.Decision{Trusted: true}}
 	signingKeys := &fakeTrustedKeys{keys: map[string]string{"v1": publicKeyB64}}
 	r := NewRunnerWithUsername(apiClient, fakeDecisionSource{approved: true}, verifier, keys, signingKeys, "alice", nil)
@@ -228,11 +220,19 @@ func TestRunner_Process_UsesConfiguredUsername(t *testing.T) {
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if keys.username != "alice" {
-		t.Fatalf("expected configured username to be used, got %q", keys.username)
+
+	wantPath := filepath.Join(keysDir, "alice", "authorized_keys")
+	got, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatalf("expected authorized_keys at %q: %v", wantPath, err)
 	}
-	if keys.pubKey == "" {
-		t.Fatal("expected ssh public key to be installed")
+	if string(got) != "ssh-ed25519 AAAATEST connector@tee\n" {
+		t.Fatalf("unexpected authorized_keys contents: %q", string(got))
+	}
+
+	unexpectedPath := filepath.Join(keysDir, "device-123", "authorized_keys")
+	if _, err := os.Stat(unexpectedPath); !os.IsNotExist(err) {
+		t.Fatalf("expected no authorized_keys at device-id path %q, got err=%v", unexpectedPath, err)
 	}
 }
 

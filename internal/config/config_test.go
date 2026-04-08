@@ -6,6 +6,47 @@ import (
 	"enclout/internal/config"
 )
 
+func TestParseAllowList_EmptyInput(t *testing.T) {
+	got := config.ParseAllowList("")
+	if len(got) != 0 {
+		t.Fatalf("expected empty result, got %#v", got)
+	}
+}
+
+func TestParseAllowList_SingleValue(t *testing.T) {
+	got := config.ParseAllowList("mrtd-123")
+	want := []string{"mrtd-123"}
+	if len(got) != len(want) || got[0] != want[0] {
+		t.Fatalf("expected %#v, got %#v", want, got)
+	}
+}
+
+func TestParseAllowList_MultipleValues(t *testing.T) {
+	got := config.ParseAllowList("mrtd-123,rtmr3-456,abc-789")
+	want := []string{"mrtd-123", "rtmr3-456", "abc-789"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %#v, got %#v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected %#v, got %#v", want, got)
+		}
+	}
+}
+
+func TestParseAllowList_WhitespaceTrimming(t *testing.T) {
+	got := config.ParseAllowList("  mrtd-123 , ,  rtmr3-456  ,   abc-789   ")
+	want := []string{"mrtd-123", "rtmr3-456", "abc-789"}
+	if len(got) != len(want) {
+		t.Fatalf("expected %#v, got %#v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("expected %#v, got %#v", want, got)
+		}
+	}
+}
+
 func TestServeConfig_Validate_MissingAuthToken(t *testing.T) {
 	c := config.DefaultServeConfig()
 	c.SigningKeyB64 = "some-key"

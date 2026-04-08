@@ -39,6 +39,8 @@ func agentCmd() *cobra.Command {
 				"dcap-url":      "ENCLOUT_DCAP_URL",
 				"dcap-token":    "ENCLOUT_DCAP_TOKEN",
 				"dcap-timeout":  "ENCLOUT_DCAP_TIMEOUT",
+				"allow-mrtd":    "ENCLOUT_ALLOW_MRTD",
+				"allow-rtmr3":   "ENCLOUT_ALLOW_RTMR3",
 				"log-format":    "ENCLOUT_LOG_FORMAT",
 			})
 
@@ -52,6 +54,8 @@ func agentCmd() *cobra.Command {
 			cfg.DCAPUrl, _ = cmd.Flags().GetString("dcap-url")
 			cfg.DCAPToken, _ = cmd.Flags().GetString("dcap-token")
 			cfg.DCAPTimeout, _ = cmd.Flags().GetDuration("dcap-timeout")
+			cfg.AllowMRTD = config.ParseAllowList(mustGetString(cmd, "allow-mrtd"))
+			cfg.AllowRTMR3 = config.ParseAllowList(mustGetString(cmd, "allow-rtmr3"))
 			cfg.LogFormat, _ = cmd.Flags().GetString("log-format")
 
 			if err := cfg.Validate(); err != nil {
@@ -113,9 +117,16 @@ func agentCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.DCAPUrl, "dcap-url", cfg.DCAPUrl, "DCAP verifier URL (required)")
 	cmd.Flags().StringVar(&cfg.DCAPToken, "dcap-token", cfg.DCAPToken, "DCAP verifier token")
 	cmd.Flags().DurationVar(&cfg.DCAPTimeout, "dcap-timeout", cfg.DCAPTimeout, "DCAP timeout")
+	cmd.Flags().String("allow-mrtd", "", "Comma-separated MRTD allowlist")
+	cmd.Flags().String("allow-rtmr3", "", "Comma-separated RTMR3 allowlist")
 	cmd.Flags().StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "Log format (text|json)")
 
 	return cmd
+}
+
+func mustGetString(cmd *cobra.Command, flagName string) string {
+	v, _ := cmd.Flags().GetString(flagName)
+	return v
 }
 
 // clientAdapter bridges client.Client to the agent.PendingPoller and

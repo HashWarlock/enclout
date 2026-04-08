@@ -2,18 +2,19 @@ package config
 
 import (
 	"fmt"
+	"strings"
 	"time"
 )
 
 type ServeConfig struct {
-	Bind            string
-	DB              string
-	ConnectorID     string
-	AuthToken       string
-	SigningKeyB64   string
-	SigningKeysJSON string
+	Bind             string
+	DB               string
+	ConnectorID      string
+	AuthToken        string
+	SigningKeyB64    string
+	SigningKeysJSON  string
 	SigningActiveKID string
-	LogFormat       string
+	LogFormat        string
 }
 
 func (c ServeConfig) Validate() error {
@@ -38,7 +39,7 @@ type AgentConfig struct {
 	DCAPTimeout      time.Duration
 	AllowMRTD        []string
 	AllowRTMR3       []string
-	SigningKeysJSON   string
+	SigningKeysJSON  string
 	SigningPubkeyB64 string
 	SigningCacheTTL  time.Duration
 	LogFormat        string
@@ -78,4 +79,26 @@ func DefaultServeConfig() ServeConfig {
 		DB:        "./enclout.db",
 		LogFormat: "text",
 	}
+}
+
+// ParseAllowList splits a comma-separated allowlist string into trimmed values.
+// Empty segments are ignored. A blank input returns nil.
+func ParseAllowList(raw string) []string {
+	if strings.TrimSpace(raw) == "" {
+		return nil
+	}
+
+	parts := strings.Split(raw, ",")
+	out := make([]string, 0, len(parts))
+	for _, part := range parts {
+		part = strings.TrimSpace(part)
+		if part == "" {
+			continue
+		}
+		out = append(out, part)
+	}
+	if len(out) == 0 {
+		return nil
+	}
+	return out
 }

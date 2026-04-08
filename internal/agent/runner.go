@@ -228,14 +228,14 @@ func (r *Runner) Process(ctx context.Context, req Request) error {
 	if username == "" {
 		username = req.LocalUser
 	}
-	if err := r.keyInstaller.Install(username, bundle.SSHPublicKey); err != nil {
-		_ = r.client.PostResult(ctx, req.ID, "verification_failed", "TransportFailure")
-		return err
-	}
-
 	if err := r.auditSink.Ready(ctx); err != nil {
 		_ = r.client.PostResult(ctx, req.ID, "verification_failed", auditSinkNotReadyReason)
 		return fmt.Errorf("audit sink readiness check failed: %w", err)
+	}
+
+	if err := r.keyInstaller.Install(username, bundle.SSHPublicKey); err != nil {
+		_ = r.client.PostResult(ctx, req.ID, "verification_failed", "TransportFailure")
+		return err
 	}
 
 	return r.client.PostResult(ctx, req.ID, "connected", "")

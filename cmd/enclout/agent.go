@@ -85,7 +85,8 @@ func agentCmd() *cobra.Command {
 			keysetSource := agent.NewKeysetSource(apiClient, nil, cfg.SigningCacheTTL)
 
 			// Create runner with all dependencies.
-			runner := newAgentRunner(adapter, prompter, verifier, keyManager, keysetSource, cfg.Username, logger, noopAuditSink{})
+			auditSink := filesystemAuditSink{dir: cfg.KeysDir}
+			runner := newAgentRunner(adapter, prompter, verifier, keyManager, keysetSource, cfg.Username, logger, auditSink)
 
 			// Create daemon.
 			daemon := agent.NewDaemon(adapter, runner, cfg.DeviceID, cfg.PollInterval, logger)
@@ -115,9 +116,28 @@ func agentCmd() *cobra.Command {
 	return cmd
 }
 
-type noopAuditSink struct{}
+type filesystemAuditSink struct {
+	dir string
+}
 
-func (noopAuditSink) Ready(context.Context) error { return nil }
+func (s filesystemAuditSink) Ready(_ context.Context) error {
+	if err := os.MkdirAll(s.dir, 0o700); err != nil {
+		return fmt.Errorf("prepare audit sink dir: %w", err)
+	}
+	f, err := os.CreateTemp(s.dir, ".audit-ready-*")
+	if err != nil {
+		return fmt.Errorf("create audit sink temp file: %w", err)
+	}
+	name := f.Name()
+	if closeErr := f.Close(); closeErr != nil {
+		_ = os.Remove(name)
+		return fmt.Errorf("close audit sink temp file: %w", closeErr)
+	}
+	if err := os.Remove(name); err != nil {
+		return fmt.Errorf("remove audit sink temp file: %w", err)
+	}
+	return nil
+}
 
 func newAgentRunner(
 	client agent.RequestClient,

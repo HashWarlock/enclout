@@ -6,6 +6,8 @@ import (
 	"crypto/rand"
 	"encoding/base64"
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"enclout/internal/agent"
@@ -178,6 +180,18 @@ func TestNewAgentRunner_WiresAuditSink(t *testing.T) {
 	}
 	if !keys.installed {
 		t.Fatal("expected ssh key installation")
+	}
+}
+
+func TestFilesystemAuditSink_Ready(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "audit")
+	sink := filesystemAuditSink{dir: dir}
+
+	if err := sink.Ready(context.Background()); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if _, err := os.Stat(dir); err != nil {
+		t.Fatalf("expected audit dir to exist: %v", err)
 	}
 }
 

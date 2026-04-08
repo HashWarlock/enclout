@@ -283,8 +283,8 @@ func TestRunner_Process_AuditSinkUnhealthy(t *testing.T) {
 	if auditSink.calls != 1 {
 		t.Fatalf("expected audit sink readiness check once, got %d", auditSink.calls)
 	}
-	if keys.installed == false {
-		t.Fatalf("expected ssh key installation to complete before audit gate")
+	if keys.installed {
+		t.Fatalf("expected ssh key installation not to run when audit gate is unhealthy")
 	}
 	if apiClient.resultStatus == "connected" {
 		t.Fatalf("expected not to report connected")

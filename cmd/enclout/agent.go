@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 
 	"enclout/internal/agent"
@@ -49,6 +50,8 @@ func agentCmd() *cobra.Command {
 			if err := loadAgentConfig(cmd, &cfg); err != nil {
 				return fmt.Errorf("invalid configuration: %w", err)
 			}
+
+			cfg.AuditDir = expandHomeDir(cfg.AuditDir)
 
 			if err := cfg.Validate(); err != nil {
 				return fmt.Errorf("invalid configuration: %w", err)
@@ -207,6 +210,19 @@ func loadAgentConfig(cmd *cobra.Command, cfg *config.AgentConfig) error {
 func mustGetString(cmd *cobra.Command, flagName string) string {
 	v, _ := cmd.Flags().GetString(flagName)
 	return v
+}
+
+func expandHomeDir(path string) string {
+	if len(path) < 2 || path[:2] != "~/" {
+		return path
+	}
+
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return path
+	}
+
+	return filepath.Join(home, path[2:])
 }
 
 // clientAdapter bridges client.Client to the agent.PendingPoller and

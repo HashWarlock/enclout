@@ -200,6 +200,17 @@ func TestFilesystemAuditSink_Ready(t *testing.T) {
 	}
 }
 
+func TestExpandHomeDir_ExpandsLeadingTilde(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "home")
+	t.Setenv("HOME", home)
+
+	got := expandHomeDir("~/audit")
+	want := filepath.Join(home, "audit")
+	if got != want {
+		t.Fatalf("expected expanded path %q, got %q", want, got)
+	}
+}
+
 func testSignedBundle(t *testing.T, tamperSignature bool) (agent.SignedBundle, string) {
 	t.Helper()
 

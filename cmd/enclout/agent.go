@@ -78,13 +78,13 @@ func agentCmd() *cobra.Command {
 			verifier := attestation.NewStrictVerifier(dcapVerifier, policy)
 
 			// Create SSH key installer.
-			keyManager := agent.NewConfiguredUsernameKeyInstaller(agent.NewSSHKeyManager(cfg.KeysDir), cfg.Username)
+			keyManager := agent.NewSSHKeyManager(cfg.KeysDir)
 
 			// Create keyset source for trusted signing key verification.
 			keysetSource := agent.NewKeysetSource(apiClient, nil, cfg.SigningCacheTTL)
 
 			// Create runner with all dependencies.
-			runner := agent.NewRunner(adapter, prompter, verifier, keyManager, keysetSource, logger)
+			runner := agent.NewRunnerWithUsername(adapter, prompter, verifier, keyManager, keysetSource, cfg.Username, logger)
 
 			// Create daemon.
 			daemon := agent.NewDaemon(adapter, runner, cfg.DeviceID, cfg.PollInterval, logger)

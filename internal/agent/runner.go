@@ -40,24 +40,6 @@ type KeyInstaller interface {
 	Install(username string, pubKey string) error
 }
 
-// NewConfiguredUsernameKeyInstaller returns a KeyInstaller that always uses
-// the configured local username when installing keys.
-func NewConfiguredUsernameKeyInstaller(inner KeyInstaller, username string) KeyInstaller {
-	return configuredUsernameKeyInstaller{
-		inner:    inner,
-		username: username,
-	}
-}
-
-type configuredUsernameKeyInstaller struct {
-	inner    KeyInstaller
-	username string
-}
-
-func (k configuredUsernameKeyInstaller) Install(_ string, pubKey string) error {
-	return k.inner.Install(k.username, pubKey)
-}
-
 // TrustedKeySource provides the current set of trusted signing keys.
 type TrustedKeySource interface {
 	TrustedKeys(ctx context.Context) (map[string]string, error)
@@ -78,6 +60,7 @@ type Runner struct {
 	verifier     BundleVerifier
 	keyInstaller KeyInstaller
 	trustedKeys  TrustedKeySource
+	installUser  string
 	logger       *slog.Logger
 }
 
@@ -90,6 +73,32 @@ func NewRunner(
 	trustedKeys TrustedKeySource,
 	logger *slog.Logger,
 ) *Runner {
+	return newRunner(client, prompter, verifier, keyInstaller, trustedKeys, "", logger)
+}
+
+// NewRunnerWithUsername creates a Runner that always installs keys for the
+// configured local username, regardless of request payload contents.
+func NewRunnerWithUsername(
+	client RequestClient,
+	prompter DecisionSource,
+	verifier BundleVerifier,
+	keyInstaller KeyInstaller,
+	trustedKeys TrustedKeySource,
+	username string,
+	logger *slog.Logger,
+) *Runner {
+	return newRunner(client, prompter, verifier, keyInstaller, trustedKeys, username, logger)
+}
+
+func newRunner(
+	client RequestClient,
+	prompter DecisionSource,
+	verifier BundleVerifier,
+	keyInstaller KeyInstaller,
+	trustedKeys TrustedKeySource,
+	username string,
+	logger *slog.Logger,
+) *Runner {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -99,6 +108,7 @@ func NewRunner(
 		verifier:     verifier,
 		keyInstaller: keyInstaller,
 		trustedKeys:  trustedKeys,
+		installUser:  username,
 		logger:       logger,
 	}
 }
@@ -168,7 +178,11 @@ func (r *Runner) Process(ctx context.Context, req Request) error {
 		return fmt.Errorf("untrusted decision: %s", decision.ReasonCode)
 	}
 
-	if err := r.keyInstaller.Install(req.LocalUser, bundle.SSHPublicKey); err != nil {
+	username := r.installUser
+	if username == "" {
+		username = req.LocalUser
+	}
+	if err := r.keyInstaller.Install(username, bundle.SSHPublicKey); err != nil {
 		_ = r.client.PostResult(ctx, req.ID, "verification_failed", "TransportFailure")
 		return err
 	}

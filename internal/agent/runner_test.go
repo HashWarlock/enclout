@@ -7,8 +7,6 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
-	"os"
-	"path/filepath"
 	"testing"
 
 	"enclout/internal/attestation"
@@ -74,6 +72,17 @@ type fakeKeyInstaller struct {
 
 func (k *fakeKeyInstaller) Install(_ string, _ string) error {
 	k.installed = true
+	return nil
+}
+
+type recordingKeyInstaller struct {
+	username string
+	pubKey   string
+}
+
+func (k *recordingKeyInstaller) Install(username string, pubKey string) error {
+	k.username = username
+	k.pubKey = pubKey
 	return nil
 }
 
@@ -203,27 +212,27 @@ func TestRunner_Process_InvalidSignature(t *testing.T) {
 	}
 }
 
-func TestConfiguredUsernameKeyInstaller_UsesConfiguredUsername(t *testing.T) {
-	baseDir := t.TempDir()
-	installer := NewConfiguredUsernameKeyInstaller(NewSSHKeyManager(baseDir), "alice")
+func TestRunner_Process_UsesConfiguredUsername(t *testing.T) {
+	bundle, publicKeyB64 := testSignedBundle(t, false)
+	apiClient := &fakeRequestClient{bundle: bundle}
+	keys := &recordingKeyInstaller{}
+	verifier := &fakeBundleVerifier{decision: attestation.Decision{Trusted: true}}
+	signingKeys := &fakeTrustedKeys{keys: map[string]string{"v1": publicKeyB64}}
+	r := NewRunnerWithUsername(apiClient, fakeDecisionSource{approved: true}, verifier, keys, signingKeys, "alice", nil)
 
-	const pubKey = "ssh-ed25519 AAAATEST connector@tee"
-	if err := installer.Install("device-123", pubKey); err != nil {
-		t.Fatalf("unexpected install error: %v", err)
-	}
-
-	wantPath := filepath.Join(baseDir, "alice", "authorized_keys")
-	got, err := os.ReadFile(wantPath)
+	err := r.Process(context.Background(), Request{
+		ID:          "req_1",
+		ConnectorID: "conn_1",
+		LocalUser:   "device-123",
+	})
 	if err != nil {
-		t.Fatalf("expected authorized_keys at %q: %v", wantPath, err)
+		t.Fatalf("unexpected error: %v", err)
 	}
-	if string(got) != pubKey+"\n" {
-		t.Fatalf("expected authorized_keys contents %q, got %q", pubKey+"\n", string(got))
+	if keys.username != "alice" {
+		t.Fatalf("expected configured username to be used, got %q", keys.username)
 	}
-
-	unexpectedPath := filepath.Join(baseDir, "device-123", "authorized_keys")
-	if _, err := os.Stat(unexpectedPath); !os.IsNotExist(err) {
-		t.Fatalf("expected no authorized_keys at device-id path %q, got err=%v", unexpectedPath, err)
+	if keys.pubKey == "" {
+		t.Fatal("expected ssh public key to be installed")
 	}
 }
 

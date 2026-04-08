@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
@@ -84,7 +85,7 @@ func agentCmd() *cobra.Command {
 			keysetSource := agent.NewKeysetSource(apiClient, nil, cfg.SigningCacheTTL)
 
 			// Create runner with all dependencies.
-			runner := agent.NewRunnerWithUsername(adapter, prompter, verifier, keyManager, keysetSource, cfg.Username, logger)
+			runner := newAgentRunner(adapter, prompter, verifier, keyManager, keysetSource, cfg.Username, logger, noopAuditSink{})
 
 			// Create daemon.
 			daemon := agent.NewDaemon(adapter, runner, cfg.DeviceID, cfg.PollInterval, logger)
@@ -112,6 +113,23 @@ func agentCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "Log format (text|json)")
 
 	return cmd
+}
+
+type noopAuditSink struct{}
+
+func (noopAuditSink) Ready(context.Context) error { return nil }
+
+func newAgentRunner(
+	client agent.RequestClient,
+	prompter agent.DecisionSource,
+	verifier agent.BundleVerifier,
+	keyInstaller agent.KeyInstaller,
+	trustedKeys agent.TrustedKeySource,
+	username string,
+	logger *slog.Logger,
+	auditSink agent.AuditSink,
+) *agent.Runner {
+	return agent.NewRunnerWithUsernameAndAuditSink(client, prompter, verifier, keyInstaller, trustedKeys, username, auditSink, logger)
 }
 
 func loadAgentConfig(cmd *cobra.Command, cfg *config.AgentConfig) error {

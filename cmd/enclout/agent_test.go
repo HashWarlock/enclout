@@ -1,10 +1,87 @@
 package main
 
 import (
+	"context"
+	"crypto/ed25519"
+	"crypto/rand"
+	"encoding/base64"
+	"encoding/json"
 	"testing"
 
+	"enclout/internal/agent"
+	"enclout/internal/attestation"
 	"enclout/internal/config"
 )
+
+type fakeAgentRequestClient struct {
+	bundle        agent.SignedBundle
+	resultStatus  string
+	resultReason  string
+	decisionCalls int
+	bundleCalls   int
+}
+
+func (f *fakeAgentRequestClient) PostDecision(_ context.Context, _ string, _ bool) error {
+	f.decisionCalls++
+	return nil
+}
+
+func (f *fakeAgentRequestClient) GetBundle(_ context.Context, _ string) (agent.SignedBundle, error) {
+	f.bundleCalls++
+	return f.bundle, nil
+}
+
+func (f *fakeAgentRequestClient) PostResult(_ context.Context, _ string, status string, reasonCode string) error {
+	f.resultStatus = status
+	f.resultReason = reasonCode
+	return nil
+}
+
+type fakeDecisionSource struct {
+	approved bool
+}
+
+func (f fakeDecisionSource) Confirm(_ context.Context, _ agent.RequestSummary) (bool, error) {
+	return f.approved, nil
+}
+
+type fakeBundleVerifier struct {
+	decision attestation.Decision
+}
+
+func (f *fakeBundleVerifier) Verify(_ context.Context, _ attestation.Bundle) (attestation.Decision, error) {
+	return f.decision, nil
+}
+
+type fakeKeyInstaller struct {
+	installed bool
+}
+
+func (k *fakeKeyInstaller) Install(_ string, _ string) error {
+	k.installed = true
+	return nil
+}
+
+type fakeTrustedKeys struct {
+	keys map[string]string
+}
+
+func (f *fakeTrustedKeys) TrustedKeys(_ context.Context) (map[string]string, error) {
+	out := make(map[string]string, len(f.keys))
+	for kid, key := range f.keys {
+		out[kid] = key
+	}
+	return out, nil
+}
+
+type fakeAuditSink struct {
+	calls int
+}
+
+func (f *fakeAuditSink) Ready(_ context.Context) error {
+	f.calls++
+	return nil
+}
 
 func TestAgentCmd_RegistersAllowListFlags(t *testing.T) {
 	cmd := agentCmd()
@@ -73,4 +150,61 @@ func TestLoadAgentConfig_AppliesEnvAndParsesAllowLists(t *testing.T) {
 			t.Fatalf("expected RTMR3 allowlist %#v, got %#v", wantRTMR3, cfg.AllowRTMR3)
 		}
 	}
+}
+
+func TestNewAgentRunner_WiresAuditSink(t *testing.T) {
+	bundle, publicKeyB64 := testSignedBundle(t, false)
+	client := &fakeAgentRequestClient{bundle: bundle}
+	verifier := &fakeBundleVerifier{decision: attestation.Decision{Trusted: true}}
+	keys := &fakeKeyInstaller{}
+	signingKeys := &fakeTrustedKeys{keys: map[string]string{"v1": publicKeyB64}}
+	auditSink := &fakeAuditSink{}
+
+	runner := newAgentRunner(client, fakeDecisionSource{approved: true}, verifier, keys, signingKeys, "alice", nil, auditSink)
+
+	err := runner.Process(context.Background(), agent.Request{
+		ID:          "req_1",
+		ConnectorID: "conn_1",
+		LocalUser:   "ignored",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if auditSink.calls != 1 {
+		t.Fatalf("expected audit sink readiness check once, got %d", auditSink.calls)
+	}
+	if client.resultStatus != "connected" {
+		t.Fatalf("expected connected status, got %q", client.resultStatus)
+	}
+	if !keys.installed {
+		t.Fatal("expected ssh key installation")
+	}
+}
+
+func testSignedBundle(t *testing.T, tamperSignature bool) (agent.SignedBundle, string) {
+	t.Helper()
+
+	payloadRaw := []byte(`{"connector_id":"conn_1","ssh_public_key":"ssh-ed25519 AAAATEST connector@tee","quote_hex":"abcd","mrtd":"mrtd","rtmr0":"rtmr0","rtmr1":"rtmr1","rtmr2":"rtmr2","rtmr3":"rtmr3","report_data_expected_sha256":"abc","policy_version":"v1"}`)
+	var payload map[string]any
+	if err := json.Unmarshal(payloadRaw, &payload); err != nil {
+		t.Fatalf("failed to unmarshal fixture payload: %v", err)
+	}
+
+	publicKey, privateKey, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate test keypair: %v", err)
+	}
+	signature := ed25519.Sign(privateKey, payloadRaw)
+	if tamperSignature {
+		signature[0] ^= 0xFF
+	}
+
+	return agent.SignedBundle{
+			Payload:    payload,
+			PayloadRaw: payloadRaw,
+			Signature:  base64.StdEncoding.EncodeToString(signature),
+			Alg:        "ed25519",
+			KID:        "v1",
+		},
+		base64.StdEncoding.EncodeToString(publicKey)
 }

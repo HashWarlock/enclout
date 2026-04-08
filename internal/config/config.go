@@ -82,11 +82,10 @@ func DefaultServeConfig() ServeConfig {
 }
 
 // ParseAllowList splits a comma-separated allowlist string into trimmed values.
-// Empty segments are ignored. A blank input returns nil, nil.
-// If the input is non-empty but yields no entries, the input is malformed.
-func ParseAllowList(raw string) ([]string, error) {
+// Empty segments are ignored. A blank input returns nil.
+func ParseAllowList(raw string) []string {
 	if strings.TrimSpace(raw) == "" {
-		return nil, nil
+		return nil
 	}
 
 	parts := strings.Split(raw, ",")
@@ -99,7 +98,7 @@ func ParseAllowList(raw string) ([]string, error) {
 		out = append(out, part)
 	}
 	if len(out) == 0 {
-		return nil, fmt.Errorf("allowlist must contain at least one value")
+		return nil
 	}
-	return out, nil
+	return out
 }

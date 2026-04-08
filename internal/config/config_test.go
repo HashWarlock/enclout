@@ -7,14 +7,20 @@ import (
 )
 
 func TestParseAllowList_EmptyInput(t *testing.T) {
-	got := config.ParseAllowList("")
+	got, err := config.ParseAllowList("")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	if len(got) != 0 {
 		t.Fatalf("expected empty result, got %#v", got)
 	}
 }
 
 func TestParseAllowList_SingleValue(t *testing.T) {
-	got := config.ParseAllowList("mrtd-123")
+	got, err := config.ParseAllowList("mrtd-123")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	want := []string{"mrtd-123"}
 	if len(got) != len(want) || got[0] != want[0] {
 		t.Fatalf("expected %#v, got %#v", want, got)
@@ -22,7 +28,10 @@ func TestParseAllowList_SingleValue(t *testing.T) {
 }
 
 func TestParseAllowList_MultipleValues(t *testing.T) {
-	got := config.ParseAllowList("mrtd-123,rtmr3-456,abc-789")
+	got, err := config.ParseAllowList("mrtd-123,rtmr3-456,abc-789")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	want := []string{"mrtd-123", "rtmr3-456", "abc-789"}
 	if len(got) != len(want) {
 		t.Fatalf("expected %#v, got %#v", want, got)
@@ -35,7 +44,10 @@ func TestParseAllowList_MultipleValues(t *testing.T) {
 }
 
 func TestParseAllowList_WhitespaceTrimming(t *testing.T) {
-	got := config.ParseAllowList("  mrtd-123 , ,  rtmr3-456  ,   abc-789   ")
+	got, err := config.ParseAllowList("  mrtd-123 , ,  rtmr3-456  ,   abc-789   ")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
 	want := []string{"mrtd-123", "rtmr3-456", "abc-789"}
 	if len(got) != len(want) {
 		t.Fatalf("expected %#v, got %#v", want, got)
@@ -44,6 +56,16 @@ func TestParseAllowList_WhitespaceTrimming(t *testing.T) {
 		if got[i] != want[i] {
 			t.Fatalf("expected %#v, got %#v", want, got)
 		}
+	}
+}
+
+func TestParseAllowList_RejectsMalformedNonEmptyInput(t *testing.T) {
+	got, err := config.ParseAllowList(",")
+	if err == nil {
+		t.Fatalf("expected error, got %#v", got)
+	}
+	if got != nil {
+		t.Fatalf("expected nil result, got %#v", got)
 	}
 }
 

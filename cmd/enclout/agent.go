@@ -44,19 +44,9 @@ func agentCmd() *cobra.Command {
 				"log-format":    "ENCLOUT_LOG_FORMAT",
 			})
 
-			// Re-read flag values after env fallback.
-			cfg.Server, _ = cmd.Flags().GetString("server")
-			cfg.DeviceID, _ = cmd.Flags().GetString("device-id")
-			cfg.Username, _ = cmd.Flags().GetString("username")
-			cfg.Token, _ = cmd.Flags().GetString("token")
-			cfg.PollInterval, _ = cmd.Flags().GetDuration("poll-interval")
-			cfg.KeysDir, _ = cmd.Flags().GetString("keys-dir")
-			cfg.DCAPUrl, _ = cmd.Flags().GetString("dcap-url")
-			cfg.DCAPToken, _ = cmd.Flags().GetString("dcap-token")
-			cfg.DCAPTimeout, _ = cmd.Flags().GetDuration("dcap-timeout")
-			cfg.AllowMRTD = config.ParseAllowList(mustGetString(cmd, "allow-mrtd"))
-			cfg.AllowRTMR3 = config.ParseAllowList(mustGetString(cmd, "allow-rtmr3"))
-			cfg.LogFormat, _ = cmd.Flags().GetString("log-format")
+			if err := loadAgentConfig(cmd, &cfg); err != nil {
+				return fmt.Errorf("invalid configuration: %w", err)
+			}
 
 			if err := cfg.Validate(); err != nil {
 				return fmt.Errorf("invalid configuration: %w", err)
@@ -122,6 +112,58 @@ func agentCmd() *cobra.Command {
 	cmd.Flags().StringVar(&cfg.LogFormat, "log-format", cfg.LogFormat, "Log format (text|json)")
 
 	return cmd
+}
+
+func loadAgentConfig(cmd *cobra.Command, cfg *config.AgentConfig) error {
+	var err error
+	cfg.Server, err = cmd.Flags().GetString("server")
+	if err != nil {
+		return err
+	}
+	cfg.DeviceID, err = cmd.Flags().GetString("device-id")
+	if err != nil {
+		return err
+	}
+	cfg.Username, err = cmd.Flags().GetString("username")
+	if err != nil {
+		return err
+	}
+	cfg.Token, err = cmd.Flags().GetString("token")
+	if err != nil {
+		return err
+	}
+	cfg.PollInterval, err = cmd.Flags().GetDuration("poll-interval")
+	if err != nil {
+		return err
+	}
+	cfg.KeysDir, err = cmd.Flags().GetString("keys-dir")
+	if err != nil {
+		return err
+	}
+	cfg.DCAPUrl, err = cmd.Flags().GetString("dcap-url")
+	if err != nil {
+		return err
+	}
+	cfg.DCAPToken, err = cmd.Flags().GetString("dcap-token")
+	if err != nil {
+		return err
+	}
+	cfg.DCAPTimeout, err = cmd.Flags().GetDuration("dcap-timeout")
+	if err != nil {
+		return err
+	}
+
+	cfg.AllowMRTD, err = config.ParseAllowList(mustGetString(cmd, "allow-mrtd"))
+	if err != nil {
+		return err
+	}
+	cfg.AllowRTMR3, err = config.ParseAllowList(mustGetString(cmd, "allow-rtmr3"))
+	if err != nil {
+		return err
+	}
+
+	cfg.LogFormat, err = cmd.Flags().GetString("log-format")
+	return err
 }
 
 func mustGetString(cmd *cobra.Command, flagName string) string {

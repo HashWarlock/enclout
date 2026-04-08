@@ -40,6 +40,24 @@ type KeyInstaller interface {
 	Install(username string, pubKey string) error
 }
 
+// NewConfiguredUsernameKeyInstaller returns a KeyInstaller that always uses
+// the configured local username when installing keys.
+func NewConfiguredUsernameKeyInstaller(inner KeyInstaller, username string) KeyInstaller {
+	return configuredUsernameKeyInstaller{
+		inner:    inner,
+		username: username,
+	}
+}
+
+type configuredUsernameKeyInstaller struct {
+	inner    KeyInstaller
+	username string
+}
+
+func (k configuredUsernameKeyInstaller) Install(_ string, pubKey string) error {
+	return k.inner.Install(k.username, pubKey)
+}
+
 // TrustedKeySource provides the current set of trusted signing keys.
 type TrustedKeySource interface {
 	TrustedKeys(ctx context.Context) (map[string]string, error)

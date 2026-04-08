@@ -78,7 +78,7 @@ func agentCmd() *cobra.Command {
 			verifier := attestation.NewStrictVerifier(dcapVerifier, policy)
 
 			// Create SSH key installer.
-			keyManager := agent.NewSSHKeyManager(cfg.KeysDir)
+			keyManager := agent.NewConfiguredUsernameKeyInstaller(agent.NewSSHKeyManager(cfg.KeysDir), cfg.Username)
 
 			// Create keyset source for trusted signing key verification.
 			keysetSource := agent.NewKeysetSource(apiClient, nil, cfg.SigningCacheTTL)
@@ -183,7 +183,7 @@ func (a *clientAdapter) ListPending(ctx context.Context, deviceID string) ([]age
 		out[i] = agent.PendingRequest{
 			ID:          r.ID,
 			ConnectorID: r.ConnectorID,
-			LocalUser:   r.DeviceID, // best available mapping
+			LocalUser:   "",
 		}
 	}
 	return out, nil

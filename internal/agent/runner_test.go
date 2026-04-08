@@ -7,6 +7,8 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"errors"
+	"os"
+	"path/filepath"
 	"testing"
 
 	"enclout/internal/attestation"
@@ -198,6 +200,30 @@ func TestRunner_Process_InvalidSignature(t *testing.T) {
 	}
 	if keys.installed {
 		t.Fatalf("expected no key installation on invalid bundle signature")
+	}
+}
+
+func TestConfiguredUsernameKeyInstaller_UsesConfiguredUsername(t *testing.T) {
+	baseDir := t.TempDir()
+	installer := NewConfiguredUsernameKeyInstaller(NewSSHKeyManager(baseDir), "alice")
+
+	const pubKey = "ssh-ed25519 AAAATEST connector@tee"
+	if err := installer.Install("device-123", pubKey); err != nil {
+		t.Fatalf("unexpected install error: %v", err)
+	}
+
+	wantPath := filepath.Join(baseDir, "alice", "authorized_keys")
+	got, err := os.ReadFile(wantPath)
+	if err != nil {
+		t.Fatalf("expected authorized_keys at %q: %v", wantPath, err)
+	}
+	if string(got) != pubKey+"\n" {
+		t.Fatalf("expected authorized_keys contents %q, got %q", pubKey+"\n", string(got))
+	}
+
+	unexpectedPath := filepath.Join(baseDir, "device-123", "authorized_keys")
+	if _, err := os.Stat(unexpectedPath); !os.IsNotExist(err) {
+		t.Fatalf("expected no authorized_keys at device-id path %q, got err=%v", unexpectedPath, err)
 	}
 }
 

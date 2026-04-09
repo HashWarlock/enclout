@@ -7,13 +7,14 @@ import (
 	"os"
 	"time"
 
+	"enclout/internal/agent"
 	"enclout/internal/client"
 
 	"github.com/spf13/cobra"
 )
 
 func statusCmd() *cobra.Command {
-	var serverURL, requestID, deviceID, token string
+	var serverURL, requestID, deviceID, token, keysDir, username string
 	var jsonOutput bool
 
 	cmd := &cobra.Command{
@@ -26,6 +27,8 @@ func statusCmd() *cobra.Command {
 				"request-id": "ENCLOUT_REQUEST_ID",
 				"device-id":  "ENCLOUT_DEVICE_ID",
 				"token":      "ENCLOUT_TOKEN",
+				"keys-dir":   "ENCLOUT_KEYS_DIR",
+				"username":   "ENCLOUT_USERNAME",
 			})
 
 			// Re-read flag values after env fallback.
@@ -33,6 +36,8 @@ func statusCmd() *cobra.Command {
 			requestID, _ = cmd.Flags().GetString("request-id")
 			deviceID, _ = cmd.Flags().GetString("device-id")
 			token, _ = cmd.Flags().GetString("token")
+			keysDir, _ = cmd.Flags().GetString("keys-dir")
+			username, _ = cmd.Flags().GetString("username")
 
 			if requestID == "" && deviceID == "" {
 				return fmt.Errorf("one of --request-id or --device-id is required")
@@ -48,7 +53,7 @@ func statusCmd() *cobra.Command {
 			}
 
 			// If --device-id: list all pending requests for the device.
-			return listPending(ctx, c, deviceID, jsonOutput)
+			return listPending(ctx, c, deviceID, jsonOutput, keysDir, username)
 		},
 	}
 
@@ -56,6 +61,8 @@ func statusCmd() *cobra.Command {
 	cmd.Flags().StringVar(&requestID, "request-id", "", "Request ID to check")
 	cmd.Flags().StringVar(&deviceID, "device-id", "", "Device ID to list pending")
 	cmd.Flags().StringVar(&token, "token", "", "Bearer auth token")
+	cmd.Flags().StringVar(&keysDir, "keys-dir", "~/.enclout/keys", "Managed SSH key directory")
+	cmd.Flags().StringVar(&username, "username", "", "Local SSH username for managed key inventory")
 	cmd.Flags().BoolVar(&jsonOutput, "json", false, "Output JSON")
 	_ = cmd.MarkFlagRequired("server")
 
@@ -88,16 +95,36 @@ func showRequest(ctx context.Context, c *client.Client, requestID string, jsonOu
 	return nil
 }
 
-func listPending(ctx context.Context, c *client.Client, deviceID string, jsonOut bool) error {
+type managedKeyStatus struct {
+	ConnectorID string    `json:"connector_id"`
+	InstalledAt time.Time `json:"installed_at"`
+	Status      string    `json:"status"`
+}
+
+type keyInventoryReport struct {
+	Enabled bool               `json:"enabled"`
+	Managed int                `json:"managed"`
+	Stale   int                `json:"stale"`
+	Keys    []managedKeyStatus `json:"keys"`
+}
+
+func listPending(ctx context.Context, c *client.Client, deviceID string, jsonOut bool, keysDir, username string) error {
 	reqs, err := c.ListPending(ctx, deviceID)
 	if err != nil {
 		return fmt.Errorf("list pending: %w", err)
+	}
+	inv, err := buildKeyInventory(ctx, c, keysDir, username)
+	if err != nil {
+		return fmt.Errorf("key inventory: %w", err)
 	}
 
 	if jsonOut {
 		enc := json.NewEncoder(os.Stdout)
 		enc.SetIndent("", "  ")
-		return enc.Encode(reqs)
+		return enc.Encode(map[string]any{
+			"pending_requests": reqs,
+			"key_inventory":    inv,
+		})
 	}
 
 	if len(reqs) == 0 {
@@ -116,5 +143,60 @@ func listPending(ctx context.Context, c *client.Client, deviceID string, jsonOut
 		fmt.Printf("Created:     %s\n", req.CreatedAt.Format(time.RFC3339))
 		fmt.Printf("Expires:     %s\n", req.ExpiresAt.Format(time.RFC3339))
 	}
+
+	if inv.Enabled {
+		if len(reqs) > 0 {
+			fmt.Println("---")
+		}
+		fmt.Printf("Managed keys: %d\n", inv.Managed)
+		fmt.Printf("Stale keys:   %d\n", inv.Stale)
+		for _, k := range inv.Keys {
+			fmt.Printf("Connector:    %s\n", k.ConnectorID)
+			if !k.InstalledAt.IsZero() {
+				fmt.Printf("Installed:    %s\n", k.InstalledAt.Format(time.RFC3339))
+			}
+			fmt.Printf("State:        %s\n", k.Status)
+			fmt.Println("---")
+		}
+	}
 	return nil
+}
+
+func buildKeyInventory(ctx context.Context, c *client.Client, keysDir, username string) (keyInventoryReport, error) {
+	if username == "" {
+		return keyInventoryReport{Enabled: false}, nil
+	}
+	manager := agent.NewSSHKeyManager(keysDir)
+	local, err := manager.ListManaged(username)
+	if err != nil {
+		return keyInventoryReport{}, err
+	}
+
+	remote, err := c.ListConnectors(ctx)
+	if err != nil {
+		return keyInventoryReport{}, err
+	}
+	remoteIDs := make(map[string]struct{}, len(remote))
+	for _, r := range remote {
+		remoteIDs[r.ConnectorID] = struct{}{}
+	}
+
+	out := keyInventoryReport{
+		Enabled: true,
+		Managed: len(local),
+		Keys:    make([]managedKeyStatus, 0, len(local)),
+	}
+	for _, k := range local {
+		state := "active"
+		if _, ok := remoteIDs[k.ConnectorID]; !ok {
+			state = "stale"
+			out.Stale++
+		}
+		out.Keys = append(out.Keys, managedKeyStatus{
+			ConnectorID: k.ConnectorID,
+			InstalledAt: k.InstalledAt,
+			Status:      state,
+		})
+	}
+	return out, nil
 }

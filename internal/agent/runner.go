@@ -6,12 +6,16 @@ import (
 	"fmt"
 	"log/slog"
 
+	"enclout/internal/access"
 	"enclout/internal/attestation"
 	"enclout/internal/signing"
 )
 
 // ErrUserDenied is returned when the user denies local approval.
 var ErrUserDenied = errors.New("user denied local approval")
+
+// ErrRequestRevoked is returned when a request is revoked while in flight.
+var ErrRequestRevoked = errors.New("request revoked")
 
 const auditSinkNotReadyReason = "AuditSinkNotReady"
 
@@ -30,6 +34,7 @@ type RequestClient interface {
 	PostDecision(ctx context.Context, requestID string, approved bool) error
 	GetBundle(ctx context.Context, requestID string) (SignedBundle, error)
 	PostResult(ctx context.Context, requestID string, status string, reasonCode string) error
+	GetRequestStatus(ctx context.Context, requestID string) (string, error)
 }
 
 // BundleVerifier verifies an attestation bundle (DCAP + measurements).
@@ -40,6 +45,8 @@ type BundleVerifier interface {
 // KeyInstaller installs SSH public keys on the local system.
 type KeyInstaller interface {
 	Install(username string, pubKey string) error
+	InstallForConnector(username string, connectorID string, pubKey string) error
+	CleanupStale(username string, activeConnectorID string) error
 }
 
 // TrustedKeySource provides the current set of trusted signing keys.
@@ -223,6 +230,9 @@ func (r *Runner) Process(ctx context.Context, req Request) error {
 		_ = r.client.PostResult(ctx, req.ID, "verification_failed", decision.ReasonCode)
 		return fmt.Errorf("untrusted decision: %s", decision.ReasonCode)
 	}
+	if err := r.ensureRequestApproved(ctx, req.ID); err != nil {
+		return err
+	}
 
 	username := r.installUser
 	if username == "" {
@@ -233,12 +243,40 @@ func (r *Runner) Process(ctx context.Context, req Request) error {
 		return fmt.Errorf("audit sink readiness check failed: %w", err)
 	}
 
-	if err := r.keyInstaller.Install(username, bundle.SSHPublicKey); err != nil {
+	if req.ConnectorID != "" {
+		if err := r.keyInstaller.InstallForConnector(username, req.ConnectorID, bundle.SSHPublicKey); err != nil {
+			_ = r.client.PostResult(ctx, req.ID, "verification_failed", "TransportFailure")
+			return err
+		}
+		if err := r.keyInstaller.CleanupStale(username, req.ConnectorID); err != nil {
+			_ = r.client.PostResult(ctx, req.ID, "verification_failed", "TransportFailure")
+			return err
+		}
+	} else if err := r.keyInstaller.Install(username, bundle.SSHPublicKey); err != nil {
 		_ = r.client.PostResult(ctx, req.ID, "verification_failed", "TransportFailure")
 		return err
 	}
 
+	if err := r.ensureRequestApproved(ctx, req.ID); err != nil {
+		return err
+	}
+
 	return r.client.PostResult(ctx, req.ID, "connected", "")
+}
+
+func (r *Runner) ensureRequestApproved(ctx context.Context, requestID string) error {
+	status, err := r.client.GetRequestStatus(ctx, requestID)
+	if err != nil {
+		return err
+	}
+	switch access.Status(status) {
+	case access.StatusApproved:
+		return nil
+	case access.StatusRevoked:
+		return fmt.Errorf("%w: %s", ErrRequestRevoked, requestID)
+	default:
+		return fmt.Errorf("request %s is no longer approved (status=%s)", requestID, status)
+	}
 }
 
 func parseBundlePayload(payload map[string]any) (attestation.Bundle, error) {

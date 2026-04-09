@@ -21,6 +21,7 @@ type fakeAgentRequestClient struct {
 	resultReason  string
 	decisionCalls int
 	bundleCalls   int
+	requestStatus string
 }
 
 func (f *fakeAgentRequestClient) PostDecision(_ context.Context, _ string, _ bool) error {
@@ -37,6 +38,13 @@ func (f *fakeAgentRequestClient) PostResult(_ context.Context, _ string, status 
 	f.resultStatus = status
 	f.resultReason = reasonCode
 	return nil
+}
+
+func (f *fakeAgentRequestClient) GetRequestStatus(_ context.Context, _ string) (string, error) {
+	if f.requestStatus == "" {
+		return "approved", nil
+	}
+	return f.requestStatus, nil
 }
 
 type fakeDecisionSource struct {
@@ -61,6 +69,15 @@ type fakeKeyInstaller struct {
 
 func (k *fakeKeyInstaller) Install(_ string, _ string) error {
 	k.installed = true
+	return nil
+}
+
+func (k *fakeKeyInstaller) InstallForConnector(_ string, _ string, _ string) error {
+	k.installed = true
+	return nil
+}
+
+func (k *fakeKeyInstaller) CleanupStale(_ string, _ string) error {
 	return nil
 }
 
@@ -161,7 +178,7 @@ func TestLoadAgentConfig_AppliesEnvAndParsesAllowLists(t *testing.T) {
 
 func TestNewAgentRunner_WiresAuditSink(t *testing.T) {
 	bundle, publicKeyB64 := testSignedBundle(t, false)
-	client := &fakeAgentRequestClient{bundle: bundle}
+	client := &fakeAgentRequestClient{bundle: bundle, requestStatus: "approved"}
 	verifier := &fakeBundleVerifier{decision: attestation.Decision{Trusted: true}}
 	keys := &fakeKeyInstaller{}
 	signingKeys := &fakeTrustedKeys{keys: map[string]string{"v1": publicKeyB64}}

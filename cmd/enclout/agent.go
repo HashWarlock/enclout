@@ -293,3 +293,12 @@ func (a *clientAdapter) GetBundle(ctx context.Context, requestID string) (agent.
 func (a *clientAdapter) PostResult(ctx context.Context, requestID string, status string, reasonCode string) error {
 	return a.client.PostResult(ctx, requestID, status, reasonCode)
 }
+
+// GetRequestStatus fetches the current request status for in-flight revocation checks.
+func (a *clientAdapter) GetRequestStatus(ctx context.Context, requestID string) (string, error) {
+	resp, err := a.client.GetRequest(ctx, requestID)
+	if err != nil {
+		return "", err
+	}
+	return resp.Status, nil
+}

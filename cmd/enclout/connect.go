@@ -75,13 +75,13 @@ func connectCmd() *cobra.Command {
 				}
 			}
 
-			// Exit codes: 0=connected, 1=denied/failed, 2=expired.
+			// Exit codes: 0=connected, 1=denied/failed/revoked, 2=expired.
 			switch access.Status(req.Status) {
 			case access.StatusConnected:
 				return nil
 			case access.StatusExpired:
 				os.Exit(2)
-			case access.StatusDeniedLocal, access.StatusVerificationFailed:
+			case access.StatusDeniedLocal, access.StatusVerificationFailed, access.StatusRevoked:
 				os.Exit(1)
 			}
 			return nil
@@ -122,7 +122,8 @@ func pollUntilTerminal(ctx context.Context, c *client.Client, requestID string) 
 			case access.StatusConnected,
 				access.StatusDeniedLocal,
 				access.StatusExpired,
-				access.StatusVerificationFailed:
+				access.StatusVerificationFailed,
+				access.StatusRevoked:
 				return req, nil
 			}
 			// Still pending or approved — keep polling.

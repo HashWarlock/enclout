@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"time"
 
 	"enclout/internal/access"
@@ -92,6 +93,55 @@ func (h *Handlers) GetRequest(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, req)
 }
 
+// ListRequests handles GET /v1/requests with optional filters and pagination.
+func (h *Handlers) ListRequests(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit := 50
+	offset := 0
+
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid_limit")
+			return
+		}
+		limit = n
+	}
+	if raw := q.Get("offset"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			writeError(w, http.StatusBadRequest, "invalid_offset")
+			return
+		}
+		offset = n
+	}
+
+	var status access.Status
+	if raw := q.Get("status"); raw != "" {
+		status = access.Status(raw)
+		if !isRequestStatus(status) {
+			writeError(w, http.StatusBadRequest, "invalid_status")
+			return
+		}
+	}
+
+	items, err := h.requests.List(r.Context(), store.RequestListOptions{
+		DeviceID:    q.Get("device_id"),
+		RequesterID: q.Get("requester_id"),
+		Status:      status,
+		Limit:       limit,
+		Offset:      offset,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list_failed")
+		return
+	}
+	if items == nil {
+		items = []access.ConnectionRequest{}
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
 type decisionBody struct {
 	Approved bool `json:"approved"`
 }
@@ -105,28 +155,27 @@ func (h *Handlers) PostDecision(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req, err := h.requests.Get(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, access.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "not_found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "get_failed")
-		return
-	}
-
+	next := access.StatusDeniedLocal
 	if body.Approved {
-		err = req.Approve()
-	} else {
-		err = req.Deny()
-	}
-	if err != nil {
-		writeError(w, http.StatusConflict, "invalid_transition")
-		return
+		next = access.StatusApproved
 	}
 
-	if err := h.requests.Update(r.Context(), req); err != nil {
-		writeError(w, http.StatusInternalServerError, "update_failed")
+	req, err := h.requests.Transition(
+		r.Context(),
+		id,
+		[]access.Status{access.StatusPendingLocalConfirm},
+		next,
+		"",
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, access.ErrNotFound):
+			writeError(w, http.StatusNotFound, "not_found")
+		case errors.Is(err, access.ErrInvalidTransition):
+			writeError(w, http.StatusConflict, "invalid_transition")
+		default:
+			writeError(w, http.StatusInternalServerError, "update_failed")
+		}
 		return
 	}
 
@@ -142,23 +191,22 @@ func (h *Handlers) PostDecision(w http.ResponseWriter, r *http.Request) {
 func (h *Handlers) PostRevoke(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	req, err := h.requests.Get(r.Context(), id)
+	req, err := h.requests.Transition(
+		r.Context(),
+		id,
+		[]access.Status{access.StatusPendingLocalConfirm, access.StatusApproved},
+		access.StatusRevoked,
+		"",
+	)
 	if err != nil {
-		if errors.Is(err, access.ErrNotFound) {
+		switch {
+		case errors.Is(err, access.ErrNotFound):
 			writeError(w, http.StatusNotFound, "not_found")
-			return
+		case errors.Is(err, access.ErrInvalidTransition):
+			writeError(w, http.StatusConflict, "invalid_transition")
+		default:
+			writeError(w, http.StatusInternalServerError, "update_failed")
 		}
-		writeError(w, http.StatusInternalServerError, "get_failed")
-		return
-	}
-
-	if err := req.Revoke(); err != nil {
-		writeError(w, http.StatusConflict, "invalid_transition")
-		return
-	}
-
-	if err := h.requests.Update(r.Context(), req); err != nil {
-		writeError(w, http.StatusInternalServerError, "update_failed")
 		return
 	}
 
@@ -180,23 +228,28 @@ func (h *Handlers) PostResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	req, err := h.requests.Get(r.Context(), id)
-	if err != nil {
-		if errors.Is(err, access.ErrNotFound) {
-			writeError(w, http.StatusNotFound, "not_found")
-			return
-		}
-		writeError(w, http.StatusInternalServerError, "get_failed")
-		return
-	}
-
-	if err := req.SetResult(access.Status(body.Status), body.ReasonCode); err != nil {
+	status := access.Status(body.Status)
+	if status != access.StatusConnected && status != access.StatusVerificationFailed {
 		writeError(w, http.StatusConflict, "invalid_transition")
 		return
 	}
 
-	if err := h.requests.Update(r.Context(), req); err != nil {
-		writeError(w, http.StatusInternalServerError, "update_failed")
+	req, err := h.requests.Transition(
+		r.Context(),
+		id,
+		[]access.Status{access.StatusApproved},
+		status,
+		body.ReasonCode,
+	)
+	if err != nil {
+		switch {
+		case errors.Is(err, access.ErrNotFound):
+			writeError(w, http.StatusNotFound, "not_found")
+		case errors.Is(err, access.ErrInvalidTransition):
+			writeError(w, http.StatusConflict, "invalid_transition")
+		default:
+			writeError(w, http.StatusInternalServerError, "update_failed")
+		}
 		return
 	}
 
@@ -266,6 +319,21 @@ func policyVersionOrDefault(v string) string {
 		return "v1"
 	}
 	return v
+}
+
+func isRequestStatus(s access.Status) bool {
+	switch s {
+	case access.StatusPendingLocalConfirm,
+		access.StatusApproved,
+		access.StatusDeniedLocal,
+		access.StatusRevoked,
+		access.StatusExpired,
+		access.StatusVerificationFailed,
+		access.StatusConnected:
+		return true
+	default:
+		return false
+	}
 }
 
 // --- Install Session handlers ---
@@ -511,6 +579,65 @@ func (h *Handlers) ListPending(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, items)
 }
 
+// ListAudit handles GET /v1/audit with optional filters and pagination.
+func (h *Handlers) ListAudit(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit := 50
+	offset := 0
+	if raw := q.Get("limit"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n <= 0 {
+			writeError(w, http.StatusBadRequest, "invalid_limit")
+			return
+		}
+		limit = n
+	}
+	if raw := q.Get("offset"); raw != "" {
+		n, err := strconv.Atoi(raw)
+		if err != nil || n < 0 {
+			writeError(w, http.StatusBadRequest, "invalid_offset")
+			return
+		}
+		offset = n
+	}
+
+	var since *time.Time
+	if raw := q.Get("since"); raw != "" {
+		t, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_since")
+			return
+		}
+		since = &t
+	}
+	var until *time.Time
+	if raw := q.Get("until"); raw != "" {
+		t, err := time.Parse(time.RFC3339, raw)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid_until")
+			return
+		}
+		until = &t
+	}
+
+	items, err := h.audit.List(r.Context(), store.AuditListOptions{
+		EntityType: q.Get("entity_type"),
+		EntityID:   q.Get("entity_id"),
+		Since:      since,
+		Until:      until,
+		Limit:      limit,
+		Offset:     offset,
+	})
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list_failed")
+		return
+	}
+	if items == nil {
+		items = []store.AuditEntry{}
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
 // --- Signing keys ---
 
 // SigningKeys handles GET /v1/signing-keys.
@@ -566,6 +693,34 @@ func (h *Handlers) RegisterConnector(w http.ResponseWriter, r *http.Request) {
 
 	_ = h.audit.Log(r.Context(), "connector", body.ConnectorID, "registered", "", "")
 	writeJSON(w, http.StatusCreated, map[string]string{"status": "registered", "connector_id": body.ConnectorID})
+}
+
+// ListConnectors handles GET /v1/connectors.
+func (h *Handlers) ListConnectors(w http.ResponseWriter, r *http.Request) {
+	items, err := h.bundles.List(r.Context())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "list_failed")
+		return
+	}
+	if items == nil {
+		items = []store.ConnectorBundle{}
+	}
+	writeJSON(w, http.StatusOK, items)
+}
+
+// GetConnector handles GET /v1/connectors/{id}.
+func (h *Handlers) GetConnector(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	item, err := h.bundles.Get(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, access.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "get_failed")
+		return
+	}
+	writeJSON(w, http.StatusOK, item)
 }
 
 // --- Operational endpoints ---

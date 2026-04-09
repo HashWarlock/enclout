@@ -17,10 +17,12 @@ import (
 type fakeRequestClient struct {
 	decisionCalls int
 	bundleCalls   int
+	statusCalls   int
 	resultStatus  string
 	resultReason  string
 	bundle        SignedBundle
 	bundleErr     error
+	requestStatus string
 }
 
 func (f *fakeRequestClient) PostDecision(_ context.Context, _ string, _ bool) error {
@@ -40,6 +42,14 @@ func (f *fakeRequestClient) PostResult(_ context.Context, _ string, status strin
 	f.resultStatus = status
 	f.resultReason = reasonCode
 	return nil
+}
+
+func (f *fakeRequestClient) GetRequestStatus(_ context.Context, _ string) (string, error) {
+	f.statusCalls++
+	if f.requestStatus == "" {
+		return "approved", nil
+	}
+	return f.requestStatus, nil
 }
 
 type fakeDecisionSource struct {
@@ -69,11 +79,33 @@ func (f *fakeBundleVerifier) Verify(_ context.Context, _ attestation.Bundle) (at
 }
 
 type fakeKeyInstaller struct {
-	installed bool
+	installed        bool
+	usedManagedFlow  bool
+	cleanupCalled    bool
+	lastConnectorID  string
+	lastManagedUser  string
+	lastInstallUser  string
+	lastInstalledKey string
 }
 
 func (k *fakeKeyInstaller) Install(_ string, _ string) error {
 	k.installed = true
+	return nil
+}
+
+func (k *fakeKeyInstaller) InstallForConnector(username, connectorID, pubKey string) error {
+	k.installed = true
+	k.usedManagedFlow = true
+	k.lastManagedUser = username
+	k.lastConnectorID = connectorID
+	k.lastInstalledKey = pubKey
+	return nil
+}
+
+func (k *fakeKeyInstaller) CleanupStale(username, activeConnectorID string) error {
+	k.cleanupCalled = true
+	k.lastInstallUser = username
+	k.lastConnectorID = activeConnectorID
 	return nil
 }
 
@@ -107,7 +139,7 @@ func (f *fakeAuditSink) Ready(_ context.Context) error {
 
 func TestRunner_Process_FullFlow(t *testing.T) {
 	bundle, publicKeyB64 := testSignedBundle(t, false)
-	apiClient := &fakeRequestClient{bundle: bundle}
+	apiClient := &fakeRequestClient{bundle: bundle, requestStatus: "approved"}
 	keys := &fakeKeyInstaller{}
 	verifier := &fakeBundleVerifier{decision: attestation.Decision{Trusted: true}}
 	signingKeys := &fakeTrustedKeys{keys: map[string]string{"v1": publicKeyB64}}
@@ -137,8 +169,17 @@ func TestRunner_Process_FullFlow(t *testing.T) {
 	if !keys.installed {
 		t.Fatalf("expected ssh key installation")
 	}
+	if !keys.usedManagedFlow {
+		t.Fatalf("expected managed key install flow")
+	}
+	if !keys.cleanupCalled {
+		t.Fatalf("expected stale key cleanup")
+	}
 	if apiClient.resultStatus != "connected" {
 		t.Fatalf("expected connected result, got %q", apiClient.resultStatus)
+	}
+	if apiClient.statusCalls != 2 {
+		t.Fatalf("expected request status check twice, got %d", apiClient.statusCalls)
 	}
 	if auditSink.calls != 1 {
 		t.Fatalf("expected audit sink readiness check once, got %d", auditSink.calls)
@@ -219,7 +260,7 @@ func TestRunner_Process_InvalidSignature(t *testing.T) {
 
 func TestRunner_Process_UsesConfiguredUsername(t *testing.T) {
 	bundle, publicKeyB64 := testSignedBundle(t, false)
-	apiClient := &fakeRequestClient{bundle: bundle}
+	apiClient := &fakeRequestClient{bundle: bundle, requestStatus: "approved"}
 	keysDir := t.TempDir()
 	keys := NewSSHKeyManager(keysDir)
 	verifier := &fakeBundleVerifier{decision: attestation.Decision{Trusted: true}}
@@ -256,7 +297,7 @@ func TestRunner_Process_UsesConfiguredUsername(t *testing.T) {
 
 func TestRunner_Process_AuditSinkUnhealthy(t *testing.T) {
 	bundle, publicKeyB64 := testSignedBundle(t, false)
-	apiClient := &fakeRequestClient{bundle: bundle}
+	apiClient := &fakeRequestClient{bundle: bundle, requestStatus: "approved"}
 	keys := &fakeKeyInstaller{}
 	verifier := &fakeBundleVerifier{decision: attestation.Decision{Trusted: true}}
 	signingKeys := &fakeTrustedKeys{keys: map[string]string{"v1": publicKeyB64}}
@@ -288,6 +329,34 @@ func TestRunner_Process_AuditSinkUnhealthy(t *testing.T) {
 	}
 	if apiClient.resultStatus == "connected" {
 		t.Fatalf("expected not to report connected")
+	}
+}
+
+func TestRunner_Process_StopsWhenRequestRevokedBeforeInstall(t *testing.T) {
+	bundle, publicKeyB64 := testSignedBundle(t, false)
+	apiClient := &fakeRequestClient{bundle: bundle, requestStatus: "revoked"}
+	keys := &fakeKeyInstaller{}
+	verifier := &fakeBundleVerifier{decision: attestation.Decision{Trusted: true}}
+	signingKeys := &fakeTrustedKeys{keys: map[string]string{"v1": publicKeyB64}}
+	auditSink := &fakeAuditSink{}
+	r := NewRunnerWithAuditSink(apiClient, fakeDecisionSource{approved: true}, verifier, keys, signingKeys, auditSink, nil)
+
+	err := r.Process(context.Background(), Request{
+		ID:          "req_1",
+		ConnectorID: "conn_1",
+		LocalUser:   "alice",
+	})
+	if err == nil {
+		t.Fatalf("expected error")
+	}
+	if keys.installed {
+		t.Fatalf("expected key install to be skipped for revoked request")
+	}
+	if apiClient.resultStatus != "" {
+		t.Fatalf("expected no result post for revoked request, got %q", apiClient.resultStatus)
+	}
+	if apiClient.statusCalls != 1 {
+		t.Fatalf("expected request status check once, got %d", apiClient.statusCalls)
 	}
 }
 

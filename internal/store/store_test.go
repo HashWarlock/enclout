@@ -242,6 +242,65 @@ func TestRequestRepository_Update(t *testing.T) {
 	}
 }
 
+func TestRequestRepository_Transition(t *testing.T) {
+	db := openTestDB(t)
+	repo := store.NewRequestRepository(db)
+	ctx := context.Background()
+
+	req := access.NewConnectionRequest("user-1", "dev-1", "conn-1", "cli", 5*time.Minute)
+	if err := repo.Create(ctx, req); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := req.Approve(); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if err := repo.Update(ctx, req); err != nil {
+		t.Fatalf("update approved: %v", err)
+	}
+
+	updated, err := repo.Transition(ctx, req.ID, []access.Status{access.StatusApproved}, access.StatusRevoked, "")
+	if err != nil {
+		t.Fatalf("transition: %v", err)
+	}
+	if updated.Status != access.StatusRevoked {
+		t.Fatalf("expected revoked, got %s", updated.Status)
+	}
+}
+
+func TestRequestRepository_Transition_ConflictsOnStaleStatus(t *testing.T) {
+	db := openTestDB(t)
+	repo := store.NewRequestRepository(db)
+	ctx := context.Background()
+
+	req := access.NewConnectionRequest("user-1", "dev-1", "conn-1", "cli", 5*time.Minute)
+	if err := repo.Create(ctx, req); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if err := req.Approve(); err != nil {
+		t.Fatalf("approve: %v", err)
+	}
+	if err := repo.Update(ctx, req); err != nil {
+		t.Fatalf("update approved: %v", err)
+	}
+
+	if _, err := repo.Transition(ctx, req.ID, []access.Status{access.StatusApproved}, access.StatusRevoked, ""); err != nil {
+		t.Fatalf("revoke transition: %v", err)
+	}
+
+	_, err := repo.Transition(ctx, req.ID, []access.Status{access.StatusApproved}, access.StatusConnected, "")
+	if !errors.Is(err, access.ErrInvalidTransition) {
+		t.Fatalf("expected ErrInvalidTransition, got %v", err)
+	}
+
+	got, err := repo.Get(ctx, req.ID)
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if got.Status != access.StatusRevoked {
+		t.Fatalf("expected status to remain revoked, got %s", got.Status)
+	}
+}
+
 func TestRequestRepository_ListPending(t *testing.T) {
 	db := openTestDB(t)
 	repo := store.NewRequestRepository(db)
@@ -260,6 +319,56 @@ func TestRequestRepository_ListPending(t *testing.T) {
 	}
 	if len(pending) != 2 {
 		t.Fatalf("expected 2, got %d", len(pending))
+	}
+}
+
+func TestRequestRepository_List_FilterAndPagination(t *testing.T) {
+	db := openTestDB(t)
+	repo := store.NewRequestRepository(db)
+	ctx := context.Background()
+
+	r1 := access.NewConnectionRequest("u1", "dev-A", "conn-1", "cli", 5*time.Minute)
+	r2 := access.NewConnectionRequest("u1", "dev-A", "conn-2", "cli", 5*time.Minute)
+	r3 := access.NewConnectionRequest("u2", "dev-B", "conn-3", "cli", 5*time.Minute)
+	if err := repo.Create(ctx, r1); err != nil {
+		t.Fatalf("create r1: %v", err)
+	}
+	if err := repo.Create(ctx, r2); err != nil {
+		t.Fatalf("create r2: %v", err)
+	}
+	if err := repo.Create(ctx, r3); err != nil {
+		t.Fatalf("create r3: %v", err)
+	}
+
+	if _, err := repo.Transition(ctx, r1.ID, []access.Status{access.StatusPendingLocalConfirm}, access.StatusApproved, ""); err != nil {
+		t.Fatalf("approve r1: %v", err)
+	}
+
+	filtered, err := repo.List(ctx, store.RequestListOptions{
+		DeviceID: "dev-A",
+		Status:   access.StatusApproved,
+		Limit:    10,
+		Offset:   0,
+	})
+	if err != nil {
+		t.Fatalf("list filtered: %v", err)
+	}
+	if len(filtered) != 1 {
+		t.Fatalf("expected 1 filtered item, got %d", len(filtered))
+	}
+	if filtered[0].ID != r1.ID {
+		t.Fatalf("expected approved request %s, got %s", r1.ID, filtered[0].ID)
+	}
+
+	paged, err := repo.List(ctx, store.RequestListOptions{
+		Limit:  2,
+		Offset: 1,
+	})
+	if err != nil {
+		t.Fatalf("list paged: %v", err)
+	}
+	if len(paged) != 2 {
+		t.Fatalf("expected 2 paged items, got %d", len(paged))
 	}
 }
 
@@ -506,5 +615,57 @@ func TestAuditLogger_QueryByEntity(t *testing.T) {
 	}
 	if len(c2Entries) != 1 {
 		t.Fatalf("c2 entries: got %d, want 1", len(c2Entries))
+	}
+}
+
+func TestAuditLogger_List_FilterAndPagination(t *testing.T) {
+	db := openTestDB(t)
+	logger := store.NewAuditLogger(db)
+	ctx := context.Background()
+
+	if err := logger.Log(ctx, "connector", "c1", "registered", "sys", ""); err != nil {
+		t.Fatalf("log 1: %v", err)
+	}
+	if err := logger.Log(ctx, "request", "r1", "created", "user", ""); err != nil {
+		t.Fatalf("log 2: %v", err)
+	}
+	if err := logger.Log(ctx, "connector", "c1", "verified", "sys", "ok"); err != nil {
+		t.Fatalf("log 3: %v", err)
+	}
+
+	filtered, err := logger.List(ctx, store.AuditListOptions{
+		EntityType: "connector",
+		EntityID:   "c1",
+		Limit:      10,
+		Offset:     0,
+	})
+	if err != nil {
+		t.Fatalf("list filtered: %v", err)
+	}
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2 filtered entries, got %d", len(filtered))
+	}
+
+	paged, err := logger.List(ctx, store.AuditListOptions{
+		Limit:  2,
+		Offset: 1,
+	})
+	if err != nil {
+		t.Fatalf("list paged: %v", err)
+	}
+	if len(paged) != 2 {
+		t.Fatalf("expected 2 paged entries, got %d", len(paged))
+	}
+
+	since := time.Now().UTC().Add(1 * time.Minute)
+	none, err := logger.List(ctx, store.AuditListOptions{
+		Since: &since,
+		Limit: 10,
+	})
+	if err != nil {
+		t.Fatalf("list since: %v", err)
+	}
+	if len(none) != 0 {
+		t.Fatalf("expected 0 entries for future since, got %d", len(none))
 	}
 }

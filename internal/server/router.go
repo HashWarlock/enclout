@@ -8,6 +8,7 @@ func NewRouter(h *Handlers, auth func(http.Handler) http.Handler) http.Handler {
 
 	// Connection requests
 	mux.Handle("POST /v1/requests", auth(http.HandlerFunc(h.CreateRequest)))
+	mux.Handle("GET /v1/requests", auth(http.HandlerFunc(h.ListRequests)))
 	mux.Handle("GET /v1/requests/{id}", auth(http.HandlerFunc(h.GetRequest)))
 	mux.Handle("POST /v1/requests/{id}/decision", auth(http.HandlerFunc(h.PostDecision)))
 	mux.Handle("POST /v1/requests/{id}/revoke", auth(http.HandlerFunc(h.PostRevoke)))
@@ -24,10 +25,13 @@ func NewRouter(h *Handlers, auth func(http.Handler) http.Handler) http.Handler {
 
 	// Device queries
 	mux.Handle("GET /v1/devices/{deviceID}/pending", auth(http.HandlerFunc(h.ListPending)))
+	mux.Handle("GET /v1/audit", auth(http.HandlerFunc(h.ListAudit)))
 
 	// Signing keys + connector registration
 	mux.Handle("GET /v1/signing-keys", auth(http.HandlerFunc(h.SigningKeys)))
 	mux.Handle("POST /v1/connectors/register", auth(http.HandlerFunc(h.RegisterConnector)))
+	mux.Handle("GET /v1/connectors", auth(http.HandlerFunc(h.ListConnectors)))
+	mux.Handle("GET /v1/connectors/{id}", auth(http.HandlerFunc(h.GetConnector)))
 
 	// Operational (no auth)
 	mux.Handle("GET /install", http.HandlerFunc(h.InstallLanding))

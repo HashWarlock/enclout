@@ -2,6 +2,7 @@ package server_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"io"
@@ -583,6 +584,83 @@ func TestRegisterConnector(t *testing.T) {
 	}
 }
 
+func TestListConnectors(t *testing.T) {
+	env := newTestEnv(t)
+
+	for _, connectorID := range []string{"conn-a", "conn-b"} {
+		body := map[string]string{
+			"connector_id":   connectorID,
+			"ssh_public_key": "ssh-ed25519 AAAATEST connector@tee",
+			"quote_hex":      "abcd",
+		}
+		resp := env.doRequest(t, "POST", "/v1/connectors/register", body, true)
+		if resp.StatusCode != http.StatusCreated {
+			respBody, _ := io.ReadAll(resp.Body)
+			resp.Body.Close()
+			t.Fatalf("expected 201, got %d: %s", resp.StatusCode, string(respBody))
+		}
+		resp.Body.Close()
+	}
+
+	listResp := env.doRequest(t, "GET", "/v1/connectors", nil, true)
+	if listResp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(listResp.Body)
+		listResp.Body.Close()
+		t.Fatalf("expected 200, got %d: %s", listResp.StatusCode, string(respBody))
+	}
+	items := decodeJSON[[]store.ConnectorBundle](t, listResp)
+	if len(items) != 2 {
+		t.Fatalf("expected 2 connectors, got %d", len(items))
+	}
+	if items[0].ConnectorID != "conn-a" || items[1].ConnectorID != "conn-b" {
+		t.Fatalf("expected sorted connector IDs [conn-a conn-b], got [%s %s]", items[0].ConnectorID, items[1].ConnectorID)
+	}
+}
+
+func TestGetConnector(t *testing.T) {
+	env := newTestEnv(t)
+
+	body := map[string]string{
+		"connector_id":   "conn-1",
+		"ssh_public_key": "ssh-ed25519 AAAATEST connector@tee",
+		"quote_hex":      "abcd",
+		"mrtd":           "mrtd",
+	}
+	regResp := env.doRequest(t, "POST", "/v1/connectors/register", body, true)
+	regResp.Body.Close()
+
+	getResp := env.doRequest(t, "GET", "/v1/connectors/conn-1", nil, true)
+	if getResp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(getResp.Body)
+		getResp.Body.Close()
+		t.Fatalf("expected 200, got %d: %s", getResp.StatusCode, string(respBody))
+	}
+	got := decodeJSON[store.ConnectorBundle](t, getResp)
+	if got.ConnectorID != "conn-1" {
+		t.Fatalf("expected connector_id conn-1, got %s", got.ConnectorID)
+	}
+	if got.MRTD != "mrtd" {
+		t.Fatalf("expected mrtd to roundtrip, got %s", got.MRTD)
+	}
+}
+
+func TestGetConnector_NotFound(t *testing.T) {
+	env := newTestEnv(t)
+
+	resp := env.doRequest(t, "GET", "/v1/connectors/missing", nil, true)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", resp.StatusCode)
+	}
+	var errBody map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&errBody); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if errBody["error"] != "not_found" {
+		t.Fatalf("expected not_found error, got %q", errBody["error"])
+	}
+}
+
 func TestGetBundle(t *testing.T) {
 	env := newTestEnv(t)
 
@@ -699,5 +777,121 @@ func TestPostResult(t *testing.T) {
 
 	if updated.Status != access.StatusConnected {
 		t.Errorf("expected status connected, got %s", updated.Status)
+	}
+}
+
+func TestListRequests_FilterAndPagination(t *testing.T) {
+	env := newTestEnv(t)
+
+	create := func(requesterID, deviceID, connectorID string) access.ConnectionRequest {
+		body := map[string]string{
+			"requester_id": requesterID,
+			"device_id":    deviceID,
+			"connector_id": connectorID,
+		}
+		resp := env.doRequest(t, "POST", "/v1/requests", body, true)
+		return decodeJSON[access.ConnectionRequest](t, resp)
+	}
+
+	r1 := create("user1", "dev1", "conn1")
+	_ = create("user1", "dev1", "conn2")
+	_ = create("user2", "dev2", "conn3")
+
+	decResp := env.doRequest(t, "POST", "/v1/requests/"+r1.ID+"/decision", map[string]bool{"approved": true}, true)
+	decResp.Body.Close()
+
+	filterResp := env.doRequest(t, "GET", "/v1/requests?device_id=dev1&status=approved&limit=10&offset=0", nil, true)
+	if filterResp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(filterResp.Body)
+		filterResp.Body.Close()
+		t.Fatalf("expected 200, got %d: %s", filterResp.StatusCode, string(respBody))
+	}
+	filtered := decodeJSON[[]access.ConnectionRequest](t, filterResp)
+	if len(filtered) != 1 {
+		t.Fatalf("expected 1 filtered item, got %d", len(filtered))
+	}
+	if filtered[0].ID != r1.ID {
+		t.Fatalf("expected approved request %s, got %s", r1.ID, filtered[0].ID)
+	}
+
+	pageResp := env.doRequest(t, "GET", "/v1/requests?limit=2&offset=1", nil, true)
+	if pageResp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(pageResp.Body)
+		pageResp.Body.Close()
+		t.Fatalf("expected 200, got %d: %s", pageResp.StatusCode, string(respBody))
+	}
+	paged := decodeJSON[[]access.ConnectionRequest](t, pageResp)
+	if len(paged) != 2 {
+		t.Fatalf("expected 2 paged items, got %d", len(paged))
+	}
+}
+
+func TestListRequests_InvalidQuery(t *testing.T) {
+	env := newTestEnv(t)
+
+	resp := env.doRequest(t, "GET", "/v1/requests?status=bogus", nil, true)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+	var errBody map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&errBody); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if errBody["error"] != "invalid_status" {
+		t.Fatalf("expected invalid_status error, got %q", errBody["error"])
+	}
+}
+
+func TestListAudit_FilterAndPagination(t *testing.T) {
+	env := newTestEnv(t)
+
+	if err := env.audit.Log(context.Background(), "connector", "c1", "registered", "sys", ""); err != nil {
+		t.Fatalf("log 1: %v", err)
+	}
+	if err := env.audit.Log(context.Background(), "request", "r1", "created", "user", ""); err != nil {
+		t.Fatalf("log 2: %v", err)
+	}
+	if err := env.audit.Log(context.Background(), "connector", "c1", "verified", "sys", "ok"); err != nil {
+		t.Fatalf("log 3: %v", err)
+	}
+
+	resp := env.doRequest(t, "GET", "/v1/audit?entity_type=connector&entity_id=c1&limit=10&offset=0", nil, true)
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		resp.Body.Close()
+		t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(body))
+	}
+	filtered := decodeJSON[[]store.AuditEntry](t, resp)
+	if len(filtered) != 2 {
+		t.Fatalf("expected 2 filtered entries, got %d", len(filtered))
+	}
+
+	page := env.doRequest(t, "GET", "/v1/audit?limit=2&offset=1", nil, true)
+	if page.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(page.Body)
+		page.Body.Close()
+		t.Fatalf("expected 200, got %d: %s", page.StatusCode, string(body))
+	}
+	paged := decodeJSON[[]store.AuditEntry](t, page)
+	if len(paged) != 2 {
+		t.Fatalf("expected 2 paged entries, got %d", len(paged))
+	}
+}
+
+func TestListAudit_InvalidTimeQuery(t *testing.T) {
+	env := newTestEnv(t)
+
+	resp := env.doRequest(t, "GET", "/v1/audit?since=not-a-time", nil, true)
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", resp.StatusCode)
+	}
+	var errBody map[string]string
+	if err := json.NewDecoder(resp.Body).Decode(&errBody); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if errBody["error"] != "invalid_since" {
+		t.Fatalf("expected invalid_since error, got %q", errBody["error"])
 	}
 }

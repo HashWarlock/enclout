@@ -75,6 +75,52 @@ type PublicKeyInfo struct {
 	PublicKeyB64 string `json:"public_key_b64"`
 }
 
+// ConnectorResponse mirrors store.ConnectorBundle as serialized by the server.
+type ConnectorResponse struct {
+	ConnectorID   string    `json:"ConnectorID"`
+	SSHPublicKey  string    `json:"SSHPublicKey"`
+	QuoteHex      string    `json:"QuoteHex"`
+	EventLog      string    `json:"EventLog"`
+	MRTD          string    `json:"MRTD"`
+	RTMR0         string    `json:"RTMR0"`
+	RTMR1         string    `json:"RTMR1"`
+	RTMR2         string    `json:"RTMR2"`
+	RTMR3         string    `json:"RTMR3"`
+	PolicyVersion string    `json:"PolicyVersion"`
+	Info          string    `json:"Info"`
+	RegisteredAt  time.Time `json:"RegisteredAt"`
+}
+
+// ListRequestsOptions specifies optional filters and pagination for request history.
+type ListRequestsOptions struct {
+	DeviceID    string
+	RequesterID string
+	Status      string
+	Limit       int
+	Offset      int
+}
+
+// AuditEntryResponse mirrors store.AuditEntry as serialized by the server.
+type AuditEntryResponse struct {
+	ID         int64     `json:"ID"`
+	EntityType string    `json:"EntityType"`
+	EntityID   string    `json:"EntityID"`
+	Action     string    `json:"Action"`
+	Actor      string    `json:"Actor"`
+	Detail     string    `json:"Detail"`
+	CreatedAt  time.Time `json:"CreatedAt"`
+}
+
+// ListAuditOptions specifies optional filters and pagination for audit queries.
+type ListAuditOptions struct {
+	EntityType string
+	EntityID   string
+	Since      string
+	Until      string
+	Limit      int
+	Offset     int
+}
+
 // Client is a typed HTTP client for the enclout API.
 type Client struct {
 	baseURL    string
@@ -115,6 +161,38 @@ func (c *Client) GetRequest(ctx context.Context, id string) (RequestResponse, er
 	var resp RequestResponse
 	if err := c.doJSON(ctx, http.MethodGet, "/v1/requests/"+url.PathEscape(id), nil, &resp); err != nil {
 		return RequestResponse{}, err
+	}
+	return resp, nil
+}
+
+// ListRequests retrieves connection requests with optional filters and pagination.
+func (c *Client) ListRequests(ctx context.Context, opts *ListRequestsOptions) ([]RequestResponse, error) {
+	path := "/v1/requests"
+	if opts != nil {
+		values := url.Values{}
+		if opts.DeviceID != "" {
+			values.Set("device_id", opts.DeviceID)
+		}
+		if opts.RequesterID != "" {
+			values.Set("requester_id", opts.RequesterID)
+		}
+		if opts.Status != "" {
+			values.Set("status", opts.Status)
+		}
+		if opts.Limit > 0 {
+			values.Set("limit", fmt.Sprintf("%d", opts.Limit))
+		}
+		if opts.Offset > 0 {
+			values.Set("offset", fmt.Sprintf("%d", opts.Offset))
+		}
+		if encoded := values.Encode(); encoded != "" {
+			path += "?" + encoded
+		}
+	}
+
+	var resp []RequestResponse
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp); err != nil {
+		return nil, err
 	}
 	return resp, nil
 }
@@ -168,6 +246,41 @@ func (c *Client) GetBundle(ctx context.Context, id string) (json.RawMessage, err
 func (c *Client) ListPending(ctx context.Context, deviceID string) ([]RequestResponse, error) {
 	var resp []RequestResponse
 	if err := c.doJSON(ctx, http.MethodGet, "/v1/devices/"+url.PathEscape(deviceID)+"/pending", nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// ListAudit retrieves audit entries with optional filters and pagination.
+func (c *Client) ListAudit(ctx context.Context, opts *ListAuditOptions) ([]AuditEntryResponse, error) {
+	path := "/v1/audit"
+	if opts != nil {
+		values := url.Values{}
+		if opts.EntityType != "" {
+			values.Set("entity_type", opts.EntityType)
+		}
+		if opts.EntityID != "" {
+			values.Set("entity_id", opts.EntityID)
+		}
+		if opts.Since != "" {
+			values.Set("since", opts.Since)
+		}
+		if opts.Until != "" {
+			values.Set("until", opts.Until)
+		}
+		if opts.Limit > 0 {
+			values.Set("limit", fmt.Sprintf("%d", opts.Limit))
+		}
+		if opts.Offset > 0 {
+			values.Set("offset", fmt.Sprintf("%d", opts.Offset))
+		}
+		if encoded := values.Encode(); encoded != "" {
+			path += "?" + encoded
+		}
+	}
+
+	var resp []AuditEntryResponse
+	if err := c.doJSON(ctx, http.MethodGet, path, nil, &resp); err != nil {
 		return nil, err
 	}
 	return resp, nil
@@ -249,6 +362,24 @@ func (c *Client) GetSigningKeys(ctx context.Context) (SigningKeyset, error) {
 // RegisterConnector registers a connector bundle with the server.
 func (c *Client) RegisterConnector(ctx context.Context, bundle interface{}) error {
 	return c.doJSON(ctx, http.MethodPost, "/v1/connectors/register", bundle, nil)
+}
+
+// ListConnectors lists all registered connectors.
+func (c *Client) ListConnectors(ctx context.Context) ([]ConnectorResponse, error) {
+	var resp []ConnectorResponse
+	if err := c.doJSON(ctx, http.MethodGet, "/v1/connectors", nil, &resp); err != nil {
+		return nil, err
+	}
+	return resp, nil
+}
+
+// GetConnector returns a registered connector by ID.
+func (c *Client) GetConnector(ctx context.Context, id string) (ConnectorResponse, error) {
+	var resp ConnectorResponse
+	if err := c.doJSON(ctx, http.MethodGet, "/v1/connectors/"+url.PathEscape(id), nil, &resp); err != nil {
+		return ConnectorResponse{}, err
+	}
+	return resp, nil
 }
 
 // --- internals ---

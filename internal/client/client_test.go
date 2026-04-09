@@ -594,6 +594,79 @@ func TestClient_GetBundle(t *testing.T) {
 	}
 }
 
+func TestClient_ListConnectors(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	for _, connectorID := range []string{"conn-a", "conn-b"} {
+		bundle := map[string]string{
+			"connector_id":   connectorID,
+			"ssh_public_key": "ssh-ed25519 AAAATEST connector@tee",
+			"quote_hex":      "abcd",
+		}
+		if err := env.client.RegisterConnector(ctx, bundle); err != nil {
+			t.Fatalf("RegisterConnector(%s): %v", connectorID, err)
+		}
+	}
+
+	items, err := env.client.ListConnectors(ctx)
+	if err != nil {
+		t.Fatalf("ListConnectors: %v", err)
+	}
+	if len(items) != 2 {
+		t.Fatalf("expected 2 connectors, got %d", len(items))
+	}
+	if items[0].ConnectorID != "conn-a" || items[1].ConnectorID != "conn-b" {
+		t.Fatalf("expected sorted connector IDs [conn-a conn-b], got [%s %s]", items[0].ConnectorID, items[1].ConnectorID)
+	}
+}
+
+func TestClient_GetConnector(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	bundle := map[string]string{
+		"connector_id":   "conn-1",
+		"ssh_public_key": "ssh-ed25519 AAAATEST connector@tee",
+		"quote_hex":      "abcd",
+		"mrtd":           "mrtd-1",
+	}
+	if err := env.client.RegisterConnector(ctx, bundle); err != nil {
+		t.Fatalf("RegisterConnector: %v", err)
+	}
+
+	got, err := env.client.GetConnector(ctx, "conn-1")
+	if err != nil {
+		t.Fatalf("GetConnector: %v", err)
+	}
+	if got.ConnectorID != "conn-1" {
+		t.Fatalf("expected connector_id conn-1, got %s", got.ConnectorID)
+	}
+	if got.MRTD != "mrtd-1" {
+		t.Fatalf("expected mrtd-1, got %s", got.MRTD)
+	}
+}
+
+func TestClient_GetConnector_NotFound(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	_, err := env.client.GetConnector(ctx, "missing")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	apiErr, ok := err.(*client.APIError)
+	if !ok {
+		t.Fatalf("expected *APIError, got %T: %v", err, err)
+	}
+	if apiErr.StatusCode != http.StatusNotFound {
+		t.Fatalf("expected 404, got %d", apiErr.StatusCode)
+	}
+	if apiErr.Message != "not_found" {
+		t.Fatalf("expected not_found, got %q", apiErr.Message)
+	}
+}
+
 func TestClient_APIError(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()
@@ -612,5 +685,131 @@ func TestClient_APIError(t *testing.T) {
 	}
 	if apiErr.Message != "not_found" {
 		t.Errorf("expected message 'not_found', got %q", apiErr.Message)
+	}
+}
+
+func TestClient_ListRequests_FilterAndPagination(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	r1, err := env.client.CreateRequest(ctx, "user1", "dev1", "conn1", "", 5*time.Minute)
+	if err != nil {
+		t.Fatalf("CreateRequest r1: %v", err)
+	}
+	if _, err := env.client.CreateRequest(ctx, "user1", "dev1", "conn2", "", 5*time.Minute); err != nil {
+		t.Fatalf("CreateRequest r2: %v", err)
+	}
+	if _, err := env.client.CreateRequest(ctx, "user2", "dev2", "conn3", "", 5*time.Minute); err != nil {
+		t.Fatalf("CreateRequest r3: %v", err)
+	}
+	if err := env.client.PostDecision(ctx, r1.ID, true); err != nil {
+		t.Fatalf("PostDecision: %v", err)
+	}
+
+	filtered, err := env.client.ListRequests(ctx, &client.ListRequestsOptions{
+		DeviceID: "dev1",
+		Status:   "approved",
+		Limit:    10,
+		Offset:   0,
+	})
+	if err != nil {
+		t.Fatalf("ListRequests filtered: %v", err)
+	}
+	if len(filtered) != 1 {
+		t.Fatalf("expected 1 filtered item, got %d", len(filtered))
+	}
+	if filtered[0].ID != r1.ID {
+		t.Fatalf("expected approved request %s, got %s", r1.ID, filtered[0].ID)
+	}
+
+	paged, err := env.client.ListRequests(ctx, &client.ListRequestsOptions{
+		Limit:  2,
+		Offset: 1,
+	})
+	if err != nil {
+		t.Fatalf("ListRequests paged: %v", err)
+	}
+	if len(paged) != 2 {
+		t.Fatalf("expected 2 paged items, got %d", len(paged))
+	}
+}
+
+func TestClient_ListRequests_InvalidStatus(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	_, err := env.client.ListRequests(ctx, &client.ListRequestsOptions{Status: "bogus"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	apiErr, ok := err.(*client.APIError)
+	if !ok {
+		t.Fatalf("expected *APIError, got %T: %v", err, err)
+	}
+	if apiErr.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", apiErr.StatusCode)
+	}
+	if apiErr.Message != "invalid_status" {
+		t.Fatalf("expected invalid_status, got %q", apiErr.Message)
+	}
+}
+
+func TestClient_ListAudit_FilterAndPagination(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	if err := env.requests.Create(ctx, access.NewConnectionRequest("user1", "dev1", "conn1", "", 5*time.Minute)); err != nil {
+		t.Fatalf("seed request: %v", err)
+	}
+	if err := env.client.RegisterConnector(ctx, map[string]string{
+		"connector_id":   "c1",
+		"ssh_public_key": "ssh-ed25519 AAAATEST connector@tee",
+		"quote_hex":      "abcd",
+	}); err != nil {
+		t.Fatalf("register connector: %v", err)
+	}
+
+	filtered, err := env.client.ListAudit(ctx, &client.ListAuditOptions{
+		EntityType: "connector",
+		EntityID:   "c1",
+		Limit:      10,
+		Offset:     0,
+	})
+	if err != nil {
+		t.Fatalf("ListAudit filtered: %v", err)
+	}
+	if len(filtered) == 0 {
+		t.Fatal("expected at least one filtered audit entry")
+	}
+
+	paged, err := env.client.ListAudit(ctx, &client.ListAuditOptions{
+		Limit:  1,
+		Offset: 0,
+	})
+	if err != nil {
+		t.Fatalf("ListAudit paged: %v", err)
+	}
+	if len(paged) != 1 {
+		t.Fatalf("expected 1 paged entry, got %d", len(paged))
+	}
+}
+
+func TestClient_ListAudit_InvalidSince(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	_, err := env.client.ListAudit(ctx, &client.ListAuditOptions{Since: "nope"})
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	apiErr, ok := err.(*client.APIError)
+	if !ok {
+		t.Fatalf("expected *APIError, got %T: %v", err, err)
+	}
+	if apiErr.StatusCode != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", apiErr.StatusCode)
+	}
+	if apiErr.Message != "invalid_since" {
+		t.Fatalf("expected invalid_since, got %q", apiErr.Message)
 	}
 }

@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"enclout/internal/access"
 )
 
 type ConnectorBundle struct {
@@ -54,7 +56,7 @@ func (r *BundleRepository) Get(ctx context.Context, connectorID string) (Connect
 		&b.PolicyVersion, &b.Info, &registeredAt,
 	)
 	if err == sql.ErrNoRows {
-		return ConnectorBundle{}, fmt.Errorf("connector %q not found", connectorID)
+		return ConnectorBundle{}, fmt.Errorf("connector %q: %w", connectorID, access.ErrNotFound)
 	}
 	if err != nil {
 		return ConnectorBundle{}, err

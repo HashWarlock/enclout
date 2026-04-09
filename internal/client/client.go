@@ -125,6 +125,11 @@ func (c *Client) PostDecision(ctx context.Context, id string, approved bool) err
 	return c.doJSON(ctx, http.MethodPost, "/v1/requests/"+url.PathEscape(id)+"/decision", body, nil)
 }
 
+// RevokeRequest revokes a connection request by ID.
+func (c *Client) RevokeRequest(ctx context.Context, id string) error {
+	return c.doJSON(ctx, http.MethodPost, "/v1/requests/"+url.PathEscape(id)+"/revoke", nil, nil)
+}
+
 // PostResult sets the final result status for an approved connection request.
 func (c *Client) PostResult(ctx context.Context, id, status, reasonCode string) error {
 	body := map[string]string{

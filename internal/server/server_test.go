@@ -341,6 +341,87 @@ func TestPostDecision_Deny(t *testing.T) {
 	}
 }
 
+func TestPostRevoke(t *testing.T) {
+	env := newTestEnv(t)
+
+	createBody := map[string]string{
+		"requester_id": "user1",
+		"device_id":    "dev1",
+		"connector_id": "conn1",
+	}
+	createResp := env.doRequest(t, "POST", "/v1/requests", createBody, true)
+	created := decodeJSON[access.ConnectionRequest](t, createResp)
+
+	decisionBody := map[string]bool{"approved": true}
+	decResp := env.doRequest(t, "POST", "/v1/requests/"+created.ID+"/decision", decisionBody, true)
+	if decResp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(decResp.Body)
+		decResp.Body.Close()
+		t.Fatalf("expected 200, got %d: %s", decResp.StatusCode, string(respBody))
+	}
+	decResp.Body.Close()
+
+	revokeResp := env.doRequest(t, "POST", "/v1/requests/"+created.ID+"/revoke", nil, true)
+	if revokeResp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(revokeResp.Body)
+		revokeResp.Body.Close()
+		t.Fatalf("expected 200, got %d: %s", revokeResp.StatusCode, string(respBody))
+	}
+	updated := decodeJSON[access.ConnectionRequest](t, revokeResp)
+
+	if updated.Status != access.StatusRevoked {
+		t.Errorf("expected status revoked, got %s", updated.Status)
+	}
+}
+
+func TestPostRevoke_InvalidTransition(t *testing.T) {
+	env := newTestEnv(t)
+
+	createBody := map[string]string{
+		"requester_id": "user1",
+		"device_id":    "dev1",
+		"connector_id": "conn1",
+	}
+	createResp := env.doRequest(t, "POST", "/v1/requests", createBody, true)
+	created := decodeJSON[access.ConnectionRequest](t, createResp)
+
+	decisionBody := map[string]bool{"approved": true}
+	decResp := env.doRequest(t, "POST", "/v1/requests/"+created.ID+"/decision", decisionBody, true)
+	if decResp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(decResp.Body)
+		decResp.Body.Close()
+		t.Fatalf("expected 200, got %d: %s", decResp.StatusCode, string(respBody))
+	}
+	decResp.Body.Close()
+
+	resultBody := map[string]string{
+		"status":      "connected",
+		"reason_code": "",
+	}
+	resultResp := env.doRequest(t, "POST", "/v1/requests/"+created.ID+"/result", resultBody, true)
+	if resultResp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resultResp.Body)
+		resultResp.Body.Close()
+		t.Fatalf("expected 200, got %d: %s", resultResp.StatusCode, string(respBody))
+	}
+	resultResp.Body.Close()
+
+	revokeResp := env.doRequest(t, "POST", "/v1/requests/"+created.ID+"/revoke", nil, true)
+	defer revokeResp.Body.Close()
+	if revokeResp.StatusCode != http.StatusConflict {
+		respBody, _ := io.ReadAll(revokeResp.Body)
+		t.Fatalf("expected 409, got %d: %s", revokeResp.StatusCode, string(respBody))
+	}
+
+	var errBody map[string]string
+	if err := json.NewDecoder(revokeResp.Body).Decode(&errBody); err != nil {
+		t.Fatalf("decode error response: %v", err)
+	}
+	if errBody["error"] != "invalid_transition" {
+		t.Fatalf("expected invalid_transition error, got %q", errBody["error"])
+	}
+}
+
 func TestListPending(t *testing.T) {
 	env := newTestEnv(t)
 

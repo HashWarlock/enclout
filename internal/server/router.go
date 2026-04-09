@@ -10,6 +10,7 @@ func NewRouter(h *Handlers, auth func(http.Handler) http.Handler) http.Handler {
 	mux.Handle("POST /v1/requests", auth(http.HandlerFunc(h.CreateRequest)))
 	mux.Handle("GET /v1/requests/{id}", auth(http.HandlerFunc(h.GetRequest)))
 	mux.Handle("POST /v1/requests/{id}/decision", auth(http.HandlerFunc(h.PostDecision)))
+	mux.Handle("POST /v1/requests/{id}/revoke", auth(http.HandlerFunc(h.PostRevoke)))
 	mux.Handle("POST /v1/requests/{id}/result", auth(http.HandlerFunc(h.PostResult)))
 	mux.Handle("GET /v1/requests/{id}/bundle", auth(http.HandlerFunc(h.GetBundle)))
 

@@ -8,6 +8,7 @@ const (
 	StatusPendingLocalConfirm Status = "pending_local_confirm"
 	StatusApproved            Status = "approved"
 	StatusDeniedLocal         Status = "denied_local"
+	StatusRevoked             Status = "revoked"
 	StatusExpired             Status = "expired"
 	StatusVerificationFailed  Status = "verification_failed"
 	StatusConnected           Status = "connected"
@@ -54,6 +55,14 @@ func (r *ConnectionRequest) Deny() error {
 		return ErrInvalidTransition
 	}
 	r.Status = StatusDeniedLocal
+	return nil
+}
+
+func (r *ConnectionRequest) Revoke() error {
+	if r.Status != StatusPendingLocalConfirm && r.Status != StatusApproved {
+		return ErrInvalidTransition
+	}
+	r.Status = StatusRevoked
 	return nil
 }
 

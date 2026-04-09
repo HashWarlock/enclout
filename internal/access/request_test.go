@@ -79,6 +79,18 @@ func TestConnectionRequest_Deny(t *testing.T) {
 	}
 }
 
+func TestConnectionRequest_Revoke(t *testing.T) {
+	cr := NewConnectionRequest("user-1", "device-1", "connector-1", "slack", 15*time.Minute)
+	_ = cr.Approve()
+
+	if err := cr.Revoke(); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if cr.Status != StatusRevoked {
+		t.Fatalf("expected Status %q, got %q", StatusRevoked, cr.Status)
+	}
+}
+
 func TestConnectionRequest_SetResult_Connected(t *testing.T) {
 	cr := NewConnectionRequest("user-1", "device-1", "connector-1", "slack", 15*time.Minute)
 	_ = cr.Approve()
@@ -156,4 +168,18 @@ func TestConnectionRequest_Expire_FromTerminalState(t *testing.T) {
 			t.Fatalf("expected ErrInvalidTransition, got %v", err)
 		}
 	})
+}
+
+func TestConnectionRequest_Revoke_FromTerminalState(t *testing.T) {
+	cr := NewConnectionRequest("user-1", "device-1", "connector-1", "slack", 15*time.Minute)
+	_ = cr.Approve()
+	_ = cr.SetResult(StatusConnected, "")
+
+	err := cr.Revoke()
+	if err == nil {
+		t.Fatal("expected error when revoking from connected state")
+	}
+	if !errors.Is(err, ErrInvalidTransition) {
+		t.Fatalf("expected ErrInvalidTransition, got %v", err)
+	}
 }

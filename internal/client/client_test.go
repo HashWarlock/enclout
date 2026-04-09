@@ -232,6 +232,62 @@ func TestClient_PostResult(t *testing.T) {
 	}
 }
 
+func TestClient_RevokeRequest(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	created, err := env.client.CreateRequest(ctx, "user1", "dev1", "conn1", "", 5*time.Minute)
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	if err := env.client.PostDecision(ctx, created.ID, true); err != nil {
+		t.Fatalf("PostDecision: %v", err)
+	}
+
+	if err := env.client.RevokeRequest(ctx, created.ID); err != nil {
+		t.Fatalf("RevokeRequest: %v", err)
+	}
+
+	got, err := env.client.GetRequest(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("GetRequest: %v", err)
+	}
+	if got.Status != "revoked" {
+		t.Errorf("expected status revoked, got %s", got.Status)
+	}
+}
+
+func TestClient_RevokeRequest_InvalidTransition(t *testing.T) {
+	env := newTestEnv(t)
+	ctx := context.Background()
+
+	created, err := env.client.CreateRequest(ctx, "user1", "dev1", "conn1", "", 5*time.Minute)
+	if err != nil {
+		t.Fatalf("CreateRequest: %v", err)
+	}
+	if err := env.client.PostDecision(ctx, created.ID, true); err != nil {
+		t.Fatalf("PostDecision: %v", err)
+	}
+	if err := env.client.PostResult(ctx, created.ID, "connected", ""); err != nil {
+		t.Fatalf("PostResult: %v", err)
+	}
+
+	err = env.client.RevokeRequest(ctx, created.ID)
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	apiErr, ok := err.(*client.APIError)
+	if !ok {
+		t.Fatalf("expected *APIError, got %T: %v", err, err)
+	}
+	if apiErr.StatusCode != http.StatusConflict {
+		t.Errorf("expected 409, got %d", apiErr.StatusCode)
+	}
+	if apiErr.Message != "invalid_transition" {
+		t.Errorf("expected message 'invalid_transition', got %q", apiErr.Message)
+	}
+}
+
 func TestClient_ListPending(t *testing.T) {
 	env := newTestEnv(t)
 	ctx := context.Background()

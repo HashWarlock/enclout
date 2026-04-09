@@ -138,6 +138,34 @@ func (h *Handlers) PostDecision(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, req)
 }
 
+// PostRevoke handles POST /v1/requests/{id}/revoke.
+func (h *Handlers) PostRevoke(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+
+	req, err := h.requests.Get(r.Context(), id)
+	if err != nil {
+		if errors.Is(err, access.ErrNotFound) {
+			writeError(w, http.StatusNotFound, "not_found")
+			return
+		}
+		writeError(w, http.StatusInternalServerError, "get_failed")
+		return
+	}
+
+	if err := req.Revoke(); err != nil {
+		writeError(w, http.StatusConflict, "invalid_transition")
+		return
+	}
+
+	if err := h.requests.Update(r.Context(), req); err != nil {
+		writeError(w, http.StatusInternalServerError, "update_failed")
+		return
+	}
+
+	_ = h.audit.Log(r.Context(), "connection_request", id, "revoked", "", "")
+	writeJSON(w, http.StatusOK, req)
+}
+
 type resultBody struct {
 	Status     string `json:"status"`
 	ReasonCode string `json:"reason_code"`
@@ -248,9 +276,9 @@ type createSessionBody struct {
 }
 
 type createSessionResponse struct {
-	Session     access.InstallSession `json:"session"`
-	InstallToken string              `json:"install_token"`
-	InstallURL   string              `json:"install_url"`
+	Session      access.InstallSession `json:"session"`
+	InstallToken string                `json:"install_token"`
+	InstallURL   string                `json:"install_url"`
 }
 
 // CreateSession handles POST /v1/sessions.

@@ -1,6 +1,24 @@
 # Secure Connector: a complete engineering design plan
 
-**The Secure Connector system establishes TEE-attested, SSH-tunneled browser control channels between a Confidential VM running dstack and a user's local machine.** The architecture derives deterministic ed25519 keys inside Intel TDX hardware, binds those keys to attestation quotes, tunnels Chrome DevTools Protocol traffic over SSH, and verifies the entire chain client-side before trusting the connection. This document provides production-ready TypeScript code, exact API contracts, infrastructure configuration, and cross-platform agent design — everything a development team needs to implement the system end-to-end.
+## Canonical Status and Phase Mapping
+
+This document is a **vision/engineering reference**, not the implementation authority.
+Canonical implementation authority is:
+
+- `docs/superpowers/specs/2026-04-08-enclout-canonical-architecture-design.md`
+- `docs/superpowers/plans/2026-04-08-enclout-drift-closure-implementation-plan.md`
+
+Phase tags for this document:
+
+- **Phase A (Trust Plane):** request/session APIs, local approval, attestation verification, signed bundle delivery.
+- **Phase B (Transport Plane):** CVM-side connector runtime, SSH reverse connectivity, shell/port-forward data plane.
+- **Phase C (Forensics Plane):** full terminal/file-op capture, endpoint-local encryption, tamper-evident audit chain.
+
+Most sections below are **Phase B/C design** material and are not claims of current repository implementation status.
+
+---
+
+**The Secure Connector system establishes TEE-attested, SSH-tunneled browser control channels between a Confidential VM running dstack and a user's local machine.** The architecture derives deterministic ed25519 keys inside Intel TDX hardware, binds those keys to attestation quotes, tunnels Chrome DevTools Protocol traffic over SSH, and verifies the entire chain client-side before trusting the connection. This document provides production-ready TypeScript code, exact API contracts, infrastructure configuration, and cross-platform agent design for forward implementation phases.
 
 The design draws on architectural patterns from ngrok (stream multiplexing), Cloudflare Tunnel (outbound-only HA connections), Tailscale (tiered key hierarchy), and Teleport (certificate-authority-based identity) while adding hardware attestation as the root of trust. Every secret originates inside the TEE's KMS, never touches disk in plaintext outside the enclave, and can be cryptographically verified by the client before any tunnel is established.
 

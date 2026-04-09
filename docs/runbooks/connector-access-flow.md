@@ -70,7 +70,7 @@ Describe the operator sequence for channel-initiated connector access with local
 
 Status polling endpoint:
 
-- `GET /v1/install-sessions/{install_session_id}`
+- `GET /v1/sessions/{install_session_id}`
 - returns current session state (`requested`, `approved`, `installed`, `failed`) plus optional `reason_code`.
 
 Canonical OpenClaw contract reference:
